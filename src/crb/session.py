@@ -45,6 +45,12 @@ class Session:
                 f"未找到登录态：{self.auth_file}\n先运行 `crb login` 完成一次扫码登录。"
             )
         state = json.loads(self.auth_file.read_text(encoding="utf-8"))
+        names = {c.get("name") for c in state.get("cookies", [])}
+        if not ({"CASTGC", "MOD_AUTH_CAS"} & names):
+            raise NotLoggedInError(
+                f"登录态文件里没有认证 Cookie（可能是一次未完成的登录）：{self.auth_file}\n"
+                "请重新运行 `crb login` 并完成扫码/密码登录。"
+            )
         cookies = httpx.Cookies()
         for c in state.get("cookies", []):
             cookies.set(

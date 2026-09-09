@@ -44,3 +44,44 @@ def test_borrow_request_defaults() -> None:
     assert payload["JYLYDM"] == "02"
     assert payload["JSJYSQLX"] == 2
     assert payload["TYPE"] == "save"
+
+
+class _FakeContext:
+    def __init__(self, cookies: list[dict]) -> None:
+        self._cookies = cookies
+
+    def cookies(self) -> list[dict]:
+        return self._cookies
+
+
+def test_auth_cookies_detects_real_login() -> None:
+    from crb.auth import _auth_cookies
+
+    real = _FakeContext(
+        [
+            {"name": "CASTGC", "domain": "authserver.nju.edu.cn"},
+            {"name": "MOD_AUTH_CAS", "domain": "ehallapp.nju.edu.cn"},
+        ]
+    )
+    assert _auth_cookies(real) == (True, True)
+
+
+def test_auth_cookies_rejects_unauthenticated() -> None:
+    from crb.auth import _auth_cookies
+
+    fake = _FakeContext([{"name": "JSESSIONID", "domain": "authserver.nju.edu.cn"}])
+    assert _auth_cookies(fake) == (False, False)
+
+
+def test_session_rejects_incomplete_state(tmp_path) -> None:
+    from crb.session import NotLoggedInError, Session
+
+    f = tmp_path / "auth.json"
+    f.write_text('{"cookies":[{"name":"JSESSIONID","value":"x"}]}', encoding="utf-8")
+    s = Session(f)
+    try:
+        s.load()
+    except NotLoggedInError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("应当拒绝没有认证 Cookie 的登录态")
