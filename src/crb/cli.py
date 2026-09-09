@@ -17,7 +17,7 @@ from rich.table import Table
 
 from . import api, auth
 from .config import CAMPUSES
-from .models import BorrowRequest, FreeRoom
+from .models import BorrowRequest
 from .session import NotLoggedInError, Session
 
 # Windows 控制台默认 GBK，会导致中文乱码；强制 UTF-8 输出。
@@ -55,24 +55,8 @@ def _session() -> Session:
     return s
 
 
-def _slot_occupied(value: str) -> bool:
-    """判断某个 JC{n} 字符串是否代表「被占用」。
-
-    ⚠️ 启发式：JC 字段形如 ``0_01_课程A,1_01_课程B``，
-    前导数字疑似占用标记（1=占用）。待实测确认后再固化。
-    """
-    if not value:
-        return False
-    return any(part.strip().startswith("1_") for part in value.split(","))
-
-
-def _period_free(room: FreeRoom, start: int, end: int) -> bool:
-    return all(not _slot_occupied(room.periods.get(f"JC{n}", "")) for n in range(start, end + 1))
-
-
-def _parse_period(text: str | None) -> tuple[int, int] | None:
-    if not text:
-        return None
+def _parse_period(text: str) -> tuple[int, int]:
+    """"1" -> (1,1)；"1-2" -> (1,2)。"""
     if "-" in text:
         a, b = text.split("-", 1)
     else:
@@ -110,7 +94,7 @@ def doctor() -> None:
     console.print(f"  借用开关 JSJYSFKT：{params.get('JSJYSFKT', '?')}")
     console.print(f"  可借日期 JYSJFW：{params.get('JYSJFW', '?')}")
     if org:
-        console.print(f"  所在单位：{org.get('DWMC', '?')}（{org.get('DWDM', '?')}）")
+        console.print(f"  所在单位代码：{org.get('DWDM') or org.get('SZDWDM', '?')}")
     if not term:
         err_console.print("[yellow]警告：拿不到学期信息，可能登录态已过期。[/yellow]")
 
@@ -146,51 +130,42 @@ def buildings(
 def free(
     campus_id: str = typer.Option(..., "--campus", "-c", help="校区代码"),
     day: str = typer.Option(..., "--date", "-d", help="日期 YYYY-MM-DD"),
+    period: str = typer.Option(..., "--period", "-p", help="节次区间，如 1-2"),
     building_id: str | None = typer.Option(None, "--building", "-b", help="教学楼代码（可选）"),
-    period: str | None = typer.Option(None, "--period", "-p", help="节次，如 1-2"),
-    term: str | None = typer.Option(None, "--term", help="学年学期，默认自动获取"),
+    room_type: str | None = typer.Option(None, "--room-type", "-t", help="教室类型代码（可选）"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """查询某天某校区的空闲教室。"""
+    """查询某天、某节次区间的空闲教室（服务端按节次过滤）。"""
     s = _session()
-    term = term or api.current_term(s)
-    if not term:
-        err_console.print("[red]拿不到当前学期，请用 --term 指定，或重新 `crb login`。[/red]")
-        raise typer.Exit(2)
-
+    start, end = _parse_period(period)
     rooms = api.free_rooms(
         s,
         campus_id=campus_id,
         day=day,
-        term=term,
+        start_period=start,
+        end_period=end,
         building_id=building_id,
+        room_type=room_type,
     )
-
-    rng = _parse_period(period)
-    if rng:
-        err_console.print(
-            "[yellow]提示：节次过滤目前为启发式（JC 字段语义待实测确认），结果仅供参考。[/yellow]"
-        )
-        rooms = [r for r in rooms if _period_free(r, *rng)]
 
     if json_out:
         _dump([r.model_dump(by_alias=True) for r in rooms])
         return
 
-    title = f"{CAMPUSES.get(campus_id, campus_id)} {day}"
-    if period:
-        title += f" 第{period}节"
+    title = f"{CAMPUSES.get(campus_id, campus_id)} {day} 第{period}节 空闲教室"
     table = Table(title=title)
     table.add_column("教室", style="cyan")
+    table.add_column("教学楼")
     table.add_column("类型")
-    table.add_column("楼层", justify="right")
     table.add_column("容量", justify="right")
+    table.add_column("空闲时间")
     for r in rooms:
         table.add_row(
-            r.room_name or r.room_code,
+            r.room_name,
+            r.building_name or "",
             r.room_type_name or "",
-            str(r.floor or ""),
             str(r.seat_class or ""),
+            r.time_label or r.period_label or "",
         )
     console.print(table)
     console.print(f"共 {len(rooms)} 间")

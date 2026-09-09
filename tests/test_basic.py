@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from crb import api
-from crb.cli import _parse_period, _period_free, _slot_occupied
-from crb.models import BorrowRequest, FreeRoom
+from crb.cli import _parse_period
+from crb.models import BorrowRequest, FreeRoomSlot
 
 
 def test_term_parts() -> None:
@@ -18,24 +18,28 @@ def test_query_setting_format() -> None:
 
 
 def test_parse_period() -> None:
-    assert _parse_period(None) is None
     assert _parse_period("1") == (1, 1)
     assert _parse_period("1-2") == (1, 2)
 
 
-def test_slot_occupied_heuristic() -> None:
-    assert _slot_occupied("") is False
-    assert _slot_occupied("0_01_课程A,0_01_课程B") is False
-    assert _slot_occupied("0_01_课程A,1_01_课程B") is True
-
-
-def test_period_free() -> None:
-    room = FreeRoom.model_validate(
-        {"JASDM": "X-101", "JASMC": "仙Ⅰ-101", "JC1": "0_01_课A", "JC2": "1_01_课B"}
+def test_free_room_slot_aliases() -> None:
+    slot = FreeRoomSlot.model_validate(
+        {
+            "JASMC": "仙Ⅰ-102",
+            "JXLDM_DISPLAY": "仙I区",
+            "JASLXDM_DISPLAY": "普通多媒体（阶梯）",
+            "SKZWS": 96,
+            "KXRQ": "2026-09-10",
+            "KSJC": 1,
+            "JSJC": 2,
+            "KXSJ": "08:00-08:50,09:00-09:50",
+        }
     )
-    room.periods = {"JC1": "0_01_课A", "JC2": "1_01_课B"}
-    assert _period_free(room, 1, 1) is True
-    assert _period_free(room, 1, 2) is False
+    assert slot.room_name == "仙Ⅰ-102"
+    assert slot.building_name == "仙I区"
+    assert slot.seat_class == 96
+    assert slot.start_period == 1
+    assert slot.time_label == "08:00-08:50,09:00-09:50"
 
 
 def test_borrow_request_defaults() -> None:

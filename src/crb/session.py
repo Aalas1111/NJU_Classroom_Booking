@@ -30,7 +30,7 @@ class Session:
         rooms = api.free_rooms(s, ...) # 直接调接口
     """
 
-    def __init__(self, auth_file: Path | None = None, timeout: float = 30.0) -> None:
+    def __init__(self, auth_file: Path | None = None, timeout: float = 60.0) -> None:
         self.auth_file = auth_file or state_path()
         self.timeout = timeout
         self._client: httpx.Client | None = None
@@ -102,13 +102,26 @@ class Session:
             self._client = None
 
     # ---- 请求封装 ----
+    def _with_retry(self, fn, attempts: int = 3):
+        """对瞬时网络错误（超时/连接失败）重试。首次请求冷启动可能较慢。"""
+        last: Exception | None = None
+        for i in range(attempts):
+            try:
+                return fn()
+            except httpx.TransportError as exc:
+                last = exc
+                if i < attempts - 1:
+                    time.sleep(1.5 * (i + 1))
+        assert last is not None
+        raise last
+
     def post_form(self, path: str, data: dict[str, Any] | None = None) -> Any:
         """POST form 并解析 JSON；若返回 HTML 则视为登录失效。"""
-        resp = self.client.post(path, data=data or {})
+        resp = self._with_retry(lambda: self.client.post(path, data=data or {}))
         return self._parse(resp)
 
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        resp = self.client.get(path, params=params or {})
+        resp = self._with_retry(lambda: self.client.get(path, params=params or {}))
         return self._parse(resp)
 
     @staticmethod

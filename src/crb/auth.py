@@ -117,11 +117,13 @@ def login(
             page.wait_for_load_state("domcontentloaded")
         except Exception:  # noqa: BLE001
             pass
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(500)
 
         state = context.storage_state()
+        # 先落盘 + 先反馈，最后再关浏览器（关进程 / 停 Playwright 驱动较慢，
+        # 不要让用户等这个收尾）
+        session.save(state)
+        print(f"✓ 登录态已保存到：{session.auth_file}")
         browser_obj.close()
 
-    session.save(state)
-    print(f"✓ 登录态已保存到：{session.auth_file}")
     return session.auth_file

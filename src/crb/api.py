@@ -28,7 +28,7 @@ from .config import (
     EP_SYS_PARAMS,
     EP_TERM,
 )
-from .models import BorrowRecord, BorrowRequest, Building, Campus, FreeRoom, SaveResult
+from .models import BorrowRecord, BorrowRequest, Building, Campus, FreeRoomSlot, SaveResult
 from .session import Session
 
 
@@ -72,11 +72,12 @@ def room_types(session: Session) -> list[dict[str, Any]]:
 
 
 def system_params(session: Session) -> dict[str, Any]:
-    """系统参数：当前学期、借用开关、可借日期范围等。"""
+    """系统参数：当前学期、借用开关、可借日期范围等。
+
+    `cxxtcs.do` 返回的是键值表：每行 `ZCSDM` 是参数代码，`CSZA` 是参数值。
+    """
     rows = _rows(session.post_form(EP_SYS_PARAMS), "cxxtcs")
-    if not rows:
-        return {}
-    return dict(rows[0])
+    return {str(r.get("ZCSDM")): r.get("CSZA") for r in rows if r.get("ZCSDM")}
 
 
 def current_term(session: Session) -> str:
@@ -87,13 +88,19 @@ def current_term(session: Session) -> str:
     rows = _rows(session.post_form(EP_TERM), "cxdqxnxq")
     if rows:
         r = rows[0]
-        return str(r.get("XNXQDM") or r.get("DQXNXQDM") or "")
+        return str(r.get("DM") or r.get("XNXQDM") or r.get("DQXNXQDM") or "")
     return ""
 
 
 def my_org(session: Session) -> dict[str, Any]:
+    """当前账号所在单位。`cxyhszdw.do` 返回 SZDWDM（即借用申请里的 JYDWDM）。"""
     rows = _rows(session.post_form(EP_ORG), "cxyhszdw")
-    return dict(rows[0]) if rows else {}
+    if not rows:
+        return {}
+    r = dict(rows[0])
+    if r.get("SZDWDM") and not r.get("DWDM"):
+        r["DWDM"] = r["SZDWDM"]
+    return r
 
 
 def borrow_types(session: Session) -> list[dict[str, Any]]:
@@ -129,48 +136,33 @@ def free_rooms(
     *,
     campus_id: str,
     day: str,
-    term: str,
+    start_period: int,
+    end_period: int,
     building_id: str | None = None,
     room_type: str | None = None,
-    week: str | None = None,
-    weekday: str | None = None,
-    page_size: int = 200,
-) -> list[FreeRoom]:
-    """查询某天某校区的空闲教室。
+    page_size: int = 999,
+) -> list[FreeRoomSlot]:
+    """查询某天、某节次区间、某校区的空闲教室。
 
-    week/weekday 不传时自动用 date_to_week 换算（需校历已配置）。
+    对应前端「按日期」页：`pagePath=/modules/kxjscx.do, action=cxkxjs`，
+    节次过滤由服务端完成（KXRQ/KSJC/JSJC），无需本地启发式。
     """
-    if week is None or weekday is None:
-        info = date_to_week(session, term, day)
-        week = week or str(info.get("ZC", ""))
-        weekday = weekday or str(info.get("XQJ", ""))
-
-    conds = [_cond("XXXQDM", campus_id)]
+    data: dict[str, Any] = {
+        "KXRQ": day,
+        "KSJC": str(start_period),
+        "JSJC": str(end_period),
+        "XXXQDM": campus_id,
+        "pageSize": page_size,
+        "pageNumber": 1,
+        "querySetting": "[]",
+    }
     if building_id:
-        conds.append(_cond("JXLDM", building_id, builder="include"))
+        data["JXLDM"] = building_id
     if room_type:
-        conds.append(_cond("JASLXDM", room_type))
+        data["JASLXDM"] = room_type
 
-    resp = session.post_form(
-        EP_FREE_ROOMS,
-        {
-            "pageSize": page_size,
-            "pageNumber": 1,
-            "XNXQDM": term,
-            "ZC": week,
-            "XQ": weekday,
-            "RQ": day,
-            "querySetting": _query_setting(conds),
-            "*order": "+LC,+JASMC",
-        },
-    )
-    rooms: list[FreeRoom] = []
-    for r in _rows(resp, "cxjsqk"):
-        periods = {k: v for k, v in r.items() if k.startswith("JC")}
-        room = FreeRoom.model_validate(r)
-        room.periods = periods
-        rooms.append(room)
-    return rooms
+    resp = session.post_form(EP_FREE_ROOMS, data)
+    return [FreeRoomSlot.model_validate(r) for r in _rows(resp, "cxkxjs")]
 
 
 # ---------------------------------------------------------------- 申请

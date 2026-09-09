@@ -53,32 +53,40 @@
 
 关键点：前端 `emapdatatable` 不会用 `?action=xxx`，而是通过 `WIS_EMAP_SERV.joinActionIdToDoUrl(pagePath, action)` 把 `.do` 替换成 `/action.do`，即：
 ```
-pagePath  /modules/kxjas.do  +  action=cxjsqk
-真实 URL  /jwapp/sys/kxjas/modules/kxjas/cxjsqk.do
+pagePath  /modules/kxjscx.do  +  action=cxkxjs
+真实 URL  /jwapp/sys/kxjas/modules/kxjscx/cxkxjs.do
 ```
+> 更正：旧记录里的 `/modules/kxjas/cxjsqk.do` 也能返回数据，但它不按节次过滤（要自己解析 `JC1..JC20`）。
+> 前端「空闲教室查询 - 按日期」真正用的是 **`kxjscx/cxkxjs.do`**，节次由服务端过滤，**推荐用这个**。
 
-实测成功的请求：
+实测成功的请求（服务端按节次过滤，结果权威）：
 ```
-POST /jwapp/sys/kxjas/modules/kxjas/cxjsqk.do
+POST /jwapp/sys/kxjas/modules/kxjscx/cxkxjs.do
 Content-Type: application/x-www-form-urlencoded
 
-pageSize=10
+KXRQ=2026-09-10
+KSJC=1
+JSJC=2
+XXXQDM=3
+pageSize=999
 pageNumber=1
-XNXQDM=2026-2027-1
-ZC=3
-XQ=4
-RQ=2026-09-10
-querySetting=[{"name":"XXXQDM","value":"3","builder":"equal","linkOpt":"AND"},{"name":"JXLDM","value":"11","builder":"include","linkOpt":"AND"}]
-*order=+LC,+JASMC
+querySetting=[]
+# 可选过滤（顶层参数，实测有效）：
+# JXLDM=11      教学楼
+# JASLXDM=14    教室类型
 ```
-返回 `{"datas":{"cxjsqk":{"totalSize":73,...}}}`，含 `JASMC/JASDM/JXLDM/LC/SKZWS/KSZWS/JASLXDM/JC1..JC20` 等字段。
+返回 `{"datas":{"cxkxjs":{"totalSize":147,...}}}`，字段：
+`JASMC` 教室名、`JXLDM(_DISPLAY)` 教学楼、`JASLXDM(_DISPLAY)` 教室类型、
+`XXXQDM(_DISPLAY)` 校区、`KXRQ` 日期、`KSJC/JSJC` 节次、`KXJC`（如 "1-2节"）、
+`KXSJ`（如 "08:00-08:50,09:00-09:50"）、`SKZWS` 上课座位、`KSZWS` 考试座位。
 
-- `/modules/kxjas/cxjsqk.do` 是**真实查询接口**（不是 `/modules/kxjas.do?action=...`）。
+实测数据（2026-09-10 仙林 第1-2节）：无过滤 223 间，`KSJC/JSJC=1-2` → **147 间**，
+`JXLDM=11` → 44 间，`JASLXDM=14` → 37 间，两者叠加 → 12 间。
+
 - datatable 参数：`pageSize`、`pageNumber`（前端从 0 开始，发请求时 +1）、`querySetting`。
 - `querySetting` 是数组 JSON 字符串，元素格式：`{"name":<字段名>,"value":<值>,"builder":<操作符>,"linkOpt":"AND"}`。
 - 操作符（builder）只使用模型里合法的值：字符串用 `equal`/`include`；数值用 `equal`。**不要用 `ge`/`gt`**（会报 `Not found object [ge]`）。
-- 搜索模型字段（`WIS_EMAP_SERV.getModel('/modules/kxjas.do','cxjsqk','search')`）里可见字段（简化）：
-  - `JASMC` 教室名称、`JASDM` 教室代码（hidden）、`JASLXDM` 教室类型（select）、`JXLDM` 教学楼、`XXXQDM` 学校校区、`LC` 楼层、`SKZWS` 上课座位数、`KSZWS` 考试座位数、`JC1..JC20` 第1~20节。
+- 前端搜索表单字段名与后端参数不同：表单用 `KXRQ/KXJC/KSZWS/SKZWS`，`createQueryParam()` 会转换成 `KXRQ/KSJC/JSJC/KSKSZWS/...` 再发给后端。
 
 教学楼/教室类型字典：
 - `POST /jwapp/sys/kxjas/modules/kxjas/jxlcx.do`，body `XXXQDM=3` → 返回仙林教学楼：仙I区(`11`)、仙II区(`12`)、逸夫楼A区(`15`)、逸夫楼B区(`16`) 等。
@@ -182,6 +190,9 @@ querySetting=[{"name":"XXXQDM","value":"3","builder":"equal","linkOpt":"AND"},{"
 - `JQSFJZJYJS` → `0`（假期不禁借用）
 - `JYSJFW` → `2026-08-21,2026-12-28`
 - `KSZJSJYQXSZ` → 考试周借用权限单位列表
+
+> 更正：`cxxtcs.do` 返回的是**键值表**（763 行），每行 `ZCSDM`=参数代码、`CSZA`=参数值、`CSSM`=说明。
+> `cxdqxnxq.do` 的学期字段是 `DM`（不是 `XNXQDM`）；`cxyhszdw.do` 的单位字段是 `SZDWDM`（即申请里的 `JYDWDM`）。
 
 ### 删除接口确认
 - 前端行渲染（`jsjysq.js` 的 `cellsRenderer`）：

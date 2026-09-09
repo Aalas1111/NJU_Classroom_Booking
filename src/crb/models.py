@@ -23,21 +23,23 @@ class Building(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class FreeRoom(BaseModel):
-    """一间教室在某个日期/节次的占用情况。"""
+class FreeRoomSlot(BaseModel):
+    """一间在指定日期/节次空闲的教室（`kxjscx/cxkxjs.do` 返回）。"""
 
-    room_code: str = Field(alias="JASDM")
     room_name: str = Field(alias="JASMC")
-    building_id: str | None = Field(default=None, alias="JXLDM")
     campus_id: str | None = Field(default=None, alias="XXXQDM")
-    floor: int | None = Field(default=None, alias="LC")
+    campus_name: str | None = Field(default=None, alias="XXXQDM_DISPLAY")
+    building_id: str | None = Field(default=None, alias="JXLDM")
+    building_name: str | None = Field(default=None, alias="JXLDM_DISPLAY")
     room_type: str | None = Field(default=None, alias="JASLXDM")
     room_type_name: str | None = Field(default=None, alias="JASLXDM_DISPLAY")
+    date: str | None = Field(default=None, alias="KXRQ")
+    start_period: int | None = Field(default=None, alias="KSJC")
+    end_period: int | None = Field(default=None, alias="JSJC")
+    period_label: str | None = Field(default=None, alias="KXJC")
+    time_label: str | None = Field(default=None, alias="KXSJ")
     seat_class: int | None = Field(default=None, alias="SKZWS")
     seat_exam: int | None = Field(default=None, alias="KSZWS")
-    date: str | None = Field(default=None, alias="ZYRQ")
-    # JC1..JC20：每节课的占用字符串，语义待实测确认
-    periods: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"populate_by_name": True, "extra": "ignore"}
 

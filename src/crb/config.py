@@ -19,7 +19,7 @@ JY_ENTRY = f"{EHALL_HOST}/jwapp/sys/jsjy/*default/index.do"
 # 空闲教室（kxjas）
 EP_CAMPUS = "/jwapp/sys/kxjas/zd/getXxxqdqx.do"                 # 校区字典
 EP_BUILDING = "/jwapp/sys/kxjas/modules/kxjas/jxlcx.do"         # 教学楼（参数 XXXQDM）
-EP_FREE_ROOMS = "/jwapp/sys/kxjas/modules/kxjas/cxjsqk.do"      # 空闲教室主查询
+EP_FREE_ROOMS = "/jwapp/sys/kxjas/modules/kxjscx/cxkxjs.do"  # 空闲教室主查询（按日期+节次，服务端过滤）
 EP_ROOM_TYPE = "/jwapp/code/79ee3ac8-c638-442b-ba24-15d6f5e79797.do"  # 教室类型字典
 
 # 教室借用（jsjy）
