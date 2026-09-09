@@ -16,9 +16,10 @@ from rich.console import Console
 from rich.table import Table
 
 from . import api, auth, planner
+from . import profile as profile_mod
 from .config import CAMPUSES
 from .models import BorrowRequest
-from .session import NotLoggedInError, Session
+from .session import NotLoggedInError, Session, WafBlockedError
 from .utils import parse_period
 
 # Windows 控制台默认 GBK，会导致中文乱码；强制 UTF-8 输出。
@@ -71,12 +72,83 @@ def login(
         help="浏览器：auto / chromium / msedge / chrome",
     ),
     timeout: int = typer.Option(300, "--timeout", help="等待登录完成的秒数"),
+    phone: str | None = typer.Option(None, "--phone", help="手机号（借用申请联系方式）"),
+    name: str | None = typer.Option(None, "--name", help="借用人姓名"),
 ) -> None:
-    """打开浏览器完成一次统一身份认证，并持久化登录态。"""
+    """打开浏览器完成一次统一身份认证，并持久化登录态；顺便采集借用人档案。"""
     if browser not in auth.BROWSER_CHOICES:
         err_console.print(f"[red]--browser 只能是：{' / '.join(auth.BROWSER_CHOICES)}[/red]")
         raise typer.Exit(2)
     auth.login(timeout=timeout, browser=browser)
+    _collect_profile(phone, name)
+
+
+def _collect_profile(phone: str | None, name: str | None) -> None:
+    """登录后采集姓名 / 手机号 / 单位，存入本地档案。"""
+    prof = profile_mod.load()
+    data: dict[str, Any] = {}
+    try:
+        s = Session()
+        s.load()
+        org = api.my_org(s)
+        if org.get("SZDWDM"):
+            data["JYDWDM"] = org["SZDWDM"]
+    except Exception:  # noqa: BLE001
+        pass
+
+    name = name or prof.get("JYRXM") or ""
+    phone = phone or prof.get("JYRDH") or ""
+    if sys.stdin.isatty():
+        if not phone:
+            phone = typer.prompt(
+                "手机号（教室借用申请的联系方式，可留空稍后填）",
+                default="",
+                show_default=False,
+            )
+        if not name:
+            name = typer.prompt("姓名（回车用系统默认）", default="", show_default=False)
+    if name:
+        data["JYRXM"] = name
+    if phone:
+        data["JYRDH"] = phone
+    if data:
+        p = profile_mod.save(data)
+        console.print(f"✓ 档案已保存：{p}")
+        console.print(
+            f"  姓名={data.get('JYRXM', '')}  手机={data.get('JYRDH', '')}  单位={data.get('JYDWDM', '')}"
+        )
+
+
+@app.command("profile")
+def profile_cmd(
+    phone: str | None = typer.Option(None, "--phone", help="设置手机号"),
+    name: str | None = typer.Option(None, "--name", help="设置姓名"),
+    org: str | None = typer.Option(None, "--org", help="设置单位代码 JYDWDM"),
+    campus: str | None = typer.Option(None, "--campus", help="设置默认校区代码"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """查看 / 修改本地借用人档案。"""
+    changes = {
+        "JYRDH": phone,
+        "JYRXM": name,
+        "JYDWDM": org,
+        "campus": campus,
+    }
+    if any(v is not None for v in changes.values()):
+        profile_mod.save(changes)
+    prof = profile_mod.load()
+    if json_out:
+        _dump(prof)
+        return
+    console.print(f"档案文件：{profile_mod.path()}")
+    for key, label in (
+        ("JYRXM", "姓名"),
+        ("JYRDH", "手机"),
+        ("JYDWDM", "单位"),
+        ("campus", "默认校区"),
+        ("JSJYLXDM", "借用类型"),
+    ):
+        console.print(f"  {label}: {prof.get(key, '')}")
 
 
 @app.command()
@@ -178,16 +250,31 @@ def plan(
         "--room-in-purpose/--no-room-in-purpose",
         help="是否把意向教室写进用途描述",
     ),
+    allow_overlap: bool = typer.Option(
+        False, "--allow-overlap", help="允许与已有申请时间重叠（默认拦截）"
+    ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """批量规划：查空闲教室 → 分配 → 冲突检测 →（可选）批量存草稿。"""
     s = _session()
     applicant, activities = planner.load_plan(file)
+    planner.apply_profile(applicant, profile_mod.load())
     if not activities:
         err_console.print("[red]活动列表为空[/red]")
         raise typer.Exit(2)
 
-    assignments = planner.build_plan(s, activities, applicant)
+    term = api.current_term(s)
+    slots, rooms = planner.existing_usage(s, term)
+    if slots:
+        console.print(f"[dim]已有申请 {len(slots)} 条，已纳入防重合检测[/dim]")
+    assignments = planner.build_plan(
+        s,
+        activities,
+        applicant,
+        existing_slots=slots,
+        existing_rooms=rooms,
+        allow_overlap=allow_overlap,
+    )
 
     if json_out and not save:
         _dump([a.model_dump(mode="json") for a in assignments])
@@ -202,6 +289,7 @@ def plan(
                 "ok": "[green]OK[/green]",
                 "no_room": "[red]无教室[/red]",
                 "too_small": "[yellow]容量不足[/yellow]",
+                "duplicate": "[yellow]时间重叠[/yellow]",
                 "error": "[red]错误[/red]",
             }.get(a.status, a.status)
             if a.note:
@@ -311,12 +399,74 @@ def borrow_delete(
     console.print(f"{mark} {res.msg or res.code}")
 
 
+@borrow_app.command("withdraw")
+def borrow_withdraw(
+    sqbh: str = typer.Option(..., "--sqbh", help="申请编号 SQBH"),
+    cqdqjy: str | None = typer.Option(None, "--cqdqjy", help="长期(1)/短期(2)，默认自动识别"),
+) -> None:
+    """撤回一条已提交的申请（撤回后可编辑再提交）。"""
+    s = _session()
+    rec = api.find_borrow(s, api.current_term(s), sqbh)
+    if rec is None:
+        err_console.print(f"[red]未找到申请：{sqbh}[/red]")
+        raise typer.Exit(2)
+    cq = cqdqjy or str(rec.get("CQDQJY") or "2")
+    res = api.withdraw_borrow(s, sqbh, cqdqjy=cq)
+    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
+    console.print(f"{mark} {res.msg or res.code}")
+
+
+@borrow_app.command("submit")
+def borrow_submit(
+    sqbh: str = typer.Option(..., "--sqbh", help="申请编号 SQBH"),
+) -> None:
+    """把草稿/已撤回的申请正式提交（TYPE=TJ）。"""
+    s = _session()
+    rec = api.find_borrow(s, api.current_term(s), sqbh)
+    if rec is None:
+        err_console.print(f"[red]未找到申请：{sqbh}[/red]")
+        raise typer.Exit(2)
+    res = api.update_borrow(s, rec, submit=True)
+    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
+    console.print(f"{mark} {res.msg or res.code}")
+
+
+@borrow_app.command("edit")
+def borrow_edit(
+    sqbh: str = typer.Option(..., "--sqbh", help="申请编号 SQBH"),
+    data: str = typer.Option(
+        ..., "--data", help='要修改的字段 JSON，如 {"ZRS":"35","JYYTMS":"..."}'
+    ),
+    draft: bool = typer.Option(False, "--draft", help="只保存草稿，不提交"),
+) -> None:
+    """修改一条已有申请（默认修改后重新提交）。"""
+    try:
+        changes = json.loads(data)
+    except json.JSONDecodeError as exc:
+        err_console.print(f"[red]--data 不是合法 JSON：{exc}[/red]")
+        raise typer.Exit(2) from exc
+    if not isinstance(changes, dict):
+        err_console.print("[red]--data 必须是 JSON 对象[/red]")
+        raise typer.Exit(2)
+    s = _session()
+    rec = api.find_borrow(s, api.current_term(s), sqbh)
+    if rec is None:
+        err_console.print(f"[red]未找到申请：{sqbh}[/red]")
+        raise typer.Exit(2)
+    res = api.update_borrow(s, rec, submit=not draft, **changes)
+    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
+    console.print(f"{mark} {res.msg or res.code}")
+
+
 def main() -> None:
     try:
         app()
     except NotLoggedInError as exc:
         err_console.print(f"[red]{exc}[/red]")
         raise SystemExit(2) from exc
+    except WafBlockedError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise SystemExit(3) from exc
     except RuntimeError as exc:
         err_console.print(f"[red]{exc}[/red]")
         raise SystemExit(1) from exc

@@ -20,6 +20,10 @@ class NotLoggedInError(RuntimeError):
     """本地没有登录态，或登录态已失效。"""
 
 
+class WafBlockedError(RuntimeError):
+    """请求被学校 WAF（风控）拦截。"""
+
+
 class Session:
     """带登录态的 httpx 客户端。
 
@@ -101,6 +105,36 @@ class Session:
             self._client.close()
             self._client = None
 
+    # ---- 风控 Cookie 刷新 ----
+    def refresh(self, browser: str = "auto", wait_ms: int = 2500) -> bool:
+        """用无头浏览器加载一次应用页，刷新 _WEU 等风控 Cookie，并写回登录态。
+
+        学校 WAF 的 `_WEU` Cookie 会过期；浏览器一加载页面就会重新下发。
+        返回是否成功（未安装 Playwright / 无登录态时返回 False）。
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            return False
+        if not self.exists():
+            return False
+
+        from .browser import launch
+        from .config import JY_ENTRY
+
+        state = json.loads(self.auth_file.read_text(encoding="utf-8"))
+        with sync_playwright() as p:
+            browser_obj, _ = launch(p, browser, headless=True)
+            context = browser_obj.new_context(storage_state=state)
+            page = context.new_page()
+            page.goto(JY_ENTRY, wait_until="domcontentloaded")
+            page.wait_for_timeout(wait_ms)
+            new_state = context.storage_state()
+            browser_obj.close()
+        self.save(new_state)
+        self.close()  # 强制用新 Cookie 重建客户端
+        return True
+
     # ---- 请求封装 ----
     def _with_retry(self, fn, attempts: int = 3):
         """对瞬时网络错误（超时/连接失败）重试。首次请求冷启动可能较慢。"""
@@ -115,14 +149,24 @@ class Session:
         assert last is not None
         raise last
 
-    def post_form(self, path: str, data: dict[str, Any] | None = None) -> Any:
-        """POST form 并解析 JSON；若返回 HTML 则视为登录失效。"""
-        resp = self._with_retry(lambda: self.client.post(path, data=data or {}))
+    def _request(self, method: str, path: str, *, data=None, params=None) -> Any:
+        def call() -> httpx.Response:
+            if method == "post":
+                return self.client.post(path, data=data or {})
+            return self.client.get(path, params=params or {})
+
+        resp = self._with_retry(call)
+        if resp.status_code == 403 and self.refresh():
+            # 风控 Cookie 过期：刷新后重建客户端再试一次
+            resp = self._with_retry(call)
         return self._parse(resp)
 
+    def post_form(self, path: str, data: dict[str, Any] | None = None) -> Any:
+        """POST form 并解析 JSON；若返回 HTML 则视为登录失效。"""
+        return self._request("post", path, data=data)
+
     def get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        resp = self._with_retry(lambda: self.client.get(path, params=params or {}))
-        return self._parse(resp)
+        return self._request("get", path, params=params)
 
     @staticmethod
     def _parse(resp: httpx.Response) -> Any:
@@ -133,6 +177,11 @@ class Session:
                 return resp.json()
             except json.JSONDecodeError:
                 pass
+        if resp.status_code == 403:
+            raise WafBlockedError(
+                "请求被学校 WAF 拦截（403）。已尝试自动刷新风控 Cookie；"
+                "若仍失败，请重新运行 `crb login`。"
+            )
         if "authserver" in text or "<title>登录" in text or "统一身份认证" in text:
             raise NotLoggedInError("登录态已失效，请重新运行 `crb login`。")
         raise RuntimeError(f"接口返回了非 JSON 内容（HTTP {resp.status_code}）：{text[:300]}")

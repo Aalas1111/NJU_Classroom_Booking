@@ -19,6 +19,15 @@ from .session import Session
 from .utils import parse_period, periods_overlap
 
 
+# ---------------------------------------------------------------- 档案
+def apply_profile(applicant: Applicant, prof: dict[str, Any]) -> Applicant:
+    """用本地档案补齐申请人的缺失字段（登录时采集）。"""
+    for key in ("JYDWDM", "JYRXM", "JYRDH", "JSJYLXDM", "campus"):
+        if not getattr(applicant, key, None) and prof.get(key):
+            setattr(applicant, key, prof[key])
+    return applicant
+
+
 # ---------------------------------------------------------------- 输入
 def load_plan(path: Path) -> tuple[Applicant, list[Activity]]:
     """读取 plan 文件。支持两种格式：
@@ -53,18 +62,52 @@ def _is_conflict(
     return any(periods_overlap(a1, a2, p1, p2) for p1, p2 in used.get(key, []))
 
 
+# ---------------------------------------------------------------- 已有申请
+def existing_usage(
+    session: Session, term: str
+) -> tuple[list[tuple[str, int, int, str]], dict[tuple[str, str], list[tuple[int, int]]]]:
+    """读「我的申请」，返回：
+
+    * ``slots``：``(日期, 开始节, 结束节, 标识)`` 列表，用于检测自己和自己时间重叠；
+    * ``rooms``：``(教室, 日期) -> [节次区间]``，来自备注 `FJ`，避免重复选同一间。
+    """
+    slots: list[tuple[str, int, int, str]] = []
+    rooms: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    for r in api.list_borrows(session, term, page_size=999):
+        day = r.get("KSRQ")
+        ks, js = r.get("KSJC"), r.get("JSJC")
+        if not day or ks in (None, "") or js in (None, ""):
+            continue
+        try:
+            a1, a2 = int(ks), int(js)
+        except (TypeError, ValueError):
+            continue
+        slots.append((str(day), a1, a2, f"{r.get('SQBH')}({r.get('SHZT_DISPLAY') or r.get('SHZT')})"))
+        room = str(r.get("FJ") or "").strip()
+        if room:
+            rooms.setdefault((room, str(day)), []).append((a1, a2))
+    return slots, rooms
+
+
 # ---------------------------------------------------------------- 规划
 def build_plan(
     session: Session,
     activities: list[Activity],
     applicant: Applicant,
+    *,
+    existing_slots: list[tuple[str, int, int, str]] | None = None,
+    existing_rooms: dict[tuple[str, str], list[tuple[int, int]]] | None = None,
+    allow_overlap: bool = False,
 ) -> list[Assignment]:
-    """为每条活动分配一间空闲教室，并做批次内冲突检测。"""
-    used: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    """为每条活动分配一间空闲教室，并做批次内 + 跨批次冲突检测。"""
+    used: dict[tuple[str, str], list[tuple[int, int]]] = {
+        k: list(v) for k, v in (existing_rooms or {}).items()
+    }
+    existing_slots = existing_slots or []
     results: list[Assignment] = []
 
     for act in activities:
-        campus = act.campus or applicant.campus
+        campus = act.campus or applicant.campus or "3"
         building = act.building or applicant.building
         room_type = act.room_type or applicant.room_type
         try:
@@ -74,6 +117,26 @@ def build_plan(
                 Assignment(activity=act, status="error", note=f"节次格式错误：{act.period}")
             )
             continue
+
+        # 跨批次：与自己已有申请的时间重叠
+        if not allow_overlap:
+            dup = next(
+                (
+                    s
+                    for s in existing_slots
+                    if s[0] == act.date and periods_overlap(a1, a2, s[1], s[2])
+                ),
+                None,
+            )
+            if dup:
+                results.append(
+                    Assignment(
+                        activity=act,
+                        status="duplicate",
+                        note=f"与已有申请时间重叠：{dup[3]}",
+                    )
+                )
+                continue
 
         try:
             rooms = api.free_rooms(

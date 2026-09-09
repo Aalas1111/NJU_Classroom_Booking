@@ -32,6 +32,7 @@ EP_CALENDAR = "/jwapp/sys/jsjy/modules/jsjysq/cxxljxjszc.do"    # 校历
 EP_WEEK_TO_DATE = "/jwapp/sys/jsjy/modules/jsjysq/gjzcxqcxrq.do"  # 周次 -> 日期
 EP_LIST = "/jwapp/sys/jsjy/modules/jsjysq/cxjsjysq.do"          # 我的申请列表
 EP_SAVE = "/jwapp/sys/jsjy/modules/jsjysq/xzjasjysq.do"         # 新增/保存/提交
+EP_WITHDRAW = "/jwapp/sys/jsjy/modules/jsjysq/shjsjysq.do"     # 撤回/审核
 EP_DELETE = "/jwapp/sys/jsjy/modules/jsjysq/scjssq.do"          # 删除申请
 
 # ---- 固定字典值 ----

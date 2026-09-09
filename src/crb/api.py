@@ -27,9 +27,13 @@ from .config import (
     EP_SAVE,
     EP_SYS_PARAMS,
     EP_TERM,
+    EP_WITHDRAW,
 )
 from .models import BorrowRecord, BorrowRequest, Building, Campus, FreeRoomSlot, SaveResult
 from .session import Session
+
+# 借用申请表真正需要的字段（用于从列表记录反向构造申请）
+_REQUEST_FIELDS = list(BorrowRequest.model_fields.keys())
 
 
 # ---------------------------------------------------------------- 基础工具
@@ -201,6 +205,51 @@ def delete_borrow(session: Session, sqbh: str) -> SaveResult:
     """删除申请/草稿（scjssq.do）。实测对草稿也生效。"""
     resp = session.post_form(EP_DELETE, {"param": json.dumps([{"SQBH": sqbh}], ensure_ascii=False)})
     ext = _datas(resp).get("scjssq", {}).get("extParams", {}) or {}
+    code = ext.get("code")
+    return SaveResult(ok=(code == 1), code=code, msg=str(ext.get("msg", "")), raw=resp)
+
+
+def withdraw_borrow(
+    session: Session, sqbh: str, cqdqjy: str = "2", jsjysqlx: str = "6"
+) -> SaveResult:
+    """撤回申请（shjsjysq.do）。撤回后状态变为 SHZT='1'，可编辑后重新提交。"""
+    resp = session.post_form(
+        EP_WITHDRAW,
+        {"SQBH": sqbh, "SHZT": "1", "JSJYSQLX": jsjysqlx, "CQDQJY": cqdqjy},
+    )
+    ext = _datas(resp).get("shjsjysq", {}).get("extParams", {}) or {}
+    code = ext.get("code")
+    return SaveResult(ok=(code == 1), code=code, msg=str(ext.get("msg", "")), raw=resp)
+
+
+def find_borrow(session: Session, term: str, sqbh: str) -> BorrowRecord | None:
+    for r in list_borrows(session, term, page_size=999):
+        if str(r.get("SQBH")) == str(sqbh):
+            return r
+    return None
+
+
+def update_borrow(
+    session: Session,
+    record: BorrowRecord | dict[str, Any],
+    *,
+    submit: bool = True,
+    **changes: Any,
+) -> SaveResult:
+    """基于已有记录修改并（默认）重新提交。
+
+    实测：带上原记录的 `WID`/`SQBH` 调 `xzjasjysq.do` 会**更新**而不是新增。
+    """
+    base: dict[str, Any] = (
+        record.model_dump() if hasattr(record, "model_dump") else dict(record)
+    )
+    data = {k: base.get(k) for k in _REQUEST_FIELDS if base.get(k) is not None}
+    data.update({k: v for k, v in changes.items() if v is not None})
+    data["WID"] = base.get("WID")
+    data["SQBH"] = base.get("SQBH")
+    data["TYPE"] = "TJ" if submit else "save"
+    resp = session.post_form(EP_SAVE, {"param": json.dumps([data], ensure_ascii=False)})
+    ext = _datas(resp).get("xzjasjysq", {}).get("extParams", {}) or {}
     code = ext.get("code")
     return SaveResult(ok=(code == 1), code=code, msg=str(ext.get("msg", "")), raw=resp)
 

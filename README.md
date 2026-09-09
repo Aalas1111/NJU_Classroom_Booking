@@ -72,6 +72,7 @@ uv run crb login --browser msedge  # 指定用系统 Edge
 
 ```bash
 uv run crb doctor                                  # 自检
+uv run crb profile --phone 173xxxxxxxx --name 李赫 --org 400760   # 借用人档案
 uv run crb campus                                  # 校区
 uv run crb buildings --campus 3                    # 仙林教学楼
 uv run crb free --campus 3 --date 2026-09-10 -p 1-2 --json   # 查空闲教室
@@ -79,10 +80,23 @@ uv run crb plan --file examples/plan.example.json             # 批量规划（�
 uv run crb plan --file examples/plan.example.json --save      # 批量规划并存草稿
 uv run crb borrow list --json                      # 我的申请
 uv run crb borrow draft --file reqs.json --json    # 批量存草稿
+uv run crb borrow draft --file reqs.json --submit  # ⚠️ 正式提交
+uv run crb borrow withdraw --sqbh <SQBH>           # 撤回已提交申请
+uv run crb borrow edit --sqbh <SQBH> --data '{"ZRS":"35"}'   # 修改并重新提交
+uv run crb borrow submit --sqbh <SQBH>             # 草稿/已撤回 → 正式提交
 uv run crb borrow delete --sqbh <SQBH>             # 删除申请/草稿
 ```
 
 所有命令都支持 `--json`，便于脚本和 AI 消费。
+
+### 申请状态（`SHZT`）
+
+| SHZT | 含义 | 可做的操作 |
+|---|---|---|
+| `00` | 草稿 | 提交 / 编辑 |
+| `65` 等 | 待审核（如待学生社团管理部审核） | 查看 / 撤回 |
+| `1` | 已撤回 | 删除 / 提交 / 编辑 |
+| `99` | 已通过 | 查看 / 打印 |
 
 ### 批量申请数据格式
 

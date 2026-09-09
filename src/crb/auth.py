@@ -18,34 +18,11 @@ import re
 import time
 from pathlib import Path
 
+from .browser import launch
 from .config import JY_ENTRY
 from .session import Session
 
 _EHALL_RE = re.compile(r"ehallapp\.nju\.edu\.cn")
-
-# auto = 依次尝试自带 Chromium -> Edge -> Chrome
-BROWSER_CHOICES = ("auto", "chromium", "msedge", "chrome")
-
-
-def _launch(p, browser: str):
-    """按需启动浏览器，返回 (browser 实例, 实际使用的名字)。"""
-    from playwright.sync_api import Error as PWError
-
-    order = ["chromium", "msedge", "chrome"] if browser == "auto" else [browser]
-    errors: list[str] = []
-    for name in order:
-        try:
-            if name == "chromium":
-                return p.chromium.launch(headless=False), name
-            return p.chromium.launch(headless=False, channel=name), name
-        except PWError as exc:  # 该浏览器不存在/无法启动，继续尝试下一个
-            errors.append(f"{name}: {str(exc).splitlines()[0]}")
-    raise SystemExit(
-        "无法启动任何浏览器，请任选其一：\n"
-        "  1) 安装系统 Edge / Chrome（推荐，免下载）；\n"
-        "  2) 下载 Playwright Chromium：`uv run playwright install chromium`\n"
-        "已尝试：\n  " + "\n  ".join(errors)
-    )
 
 
 def _auth_cookies(context) -> tuple[bool, bool]:
@@ -85,7 +62,7 @@ def login(
     session.auth_file.parent.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as p:
-        browser_obj, used = _launch(p, browser)
+        browser_obj, used = launch(p, browser, headless=False)
         context = browser_obj.new_context()
         page = context.new_page()
         print(f"→ 已用 {used} 打开浏览器，请完成南京大学统一身份认证（扫码或账号密码）。")

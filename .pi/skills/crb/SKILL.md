@@ -41,6 +41,10 @@ uv run crb login                      # 打开浏览器，用户自己扫码/输
 | `crb plan --file plan.json --save` | 批量规划并保存草稿 |
 | `crb borrow list --json` | 查看我的申请（含 SQBH、审核状态 SHZT） |
 | `crb borrow draft --file reqs.json --json` | 批量保存草稿 |
+| `crb borrow draft --file reqs.json --submit` | ⚠️ 正式提交 |
+| `crb borrow withdraw --sqbh <SQBH>` | 撤回已提交申请 |
+| `crb borrow edit --sqbh <SQBH> --data '{...}'` | 修改并重新提交 |
+| `crb borrow submit --sqbh <SQBH>` | 草稿/已撤回 → 正式提交 |
 | `crb borrow draft --data '{...}'` | 保存单条草稿 |
 | `crb borrow delete --sqbh <SQBH>` | 删除申请/草稿 |
 
@@ -96,10 +100,15 @@ uv run crb login                      # 打开浏览器，用户自己扫码/输
 ## 硬性规则（务必遵守）
 
 1. **默认只存草稿**（`TYPE=save`）。**任何正式提交都必须由用户显式要求并再次确认。**
+   正式提交用 `--submit` / `crb borrow submit`；撤回用 `crb borrow withdraw`。
 2. 不要在真实系统里制造垃圾数据；测试产生的草稿必须用 `crb borrow delete --sqbh` 清理。
 3. 批量操作前先用 `crb doctor` 确认登录态，失败就提示用户重新 `crb login`。
-4. 申请时间冲突要自己检查：同一教室同一节次不要重复申请；同一批活动尽量错开。
-5. 不要把 `~/.crb/auth.json` 的内容打印、上传或写进任何日志。
+4. `crb plan` 会自动读「我的申请」做跨批次防重合：
+   - 与自己已有申请时间重叠 → 标记 `duplicate` 并跳过；
+   - 从备注 `FJ` 读取已用教室，避免重复选同一间。
+   确实需要重叠时用 `--allow-overlap`。
+5. 申请时间冲突要自己检查：同一教室同一节次不要重复申请；同一批活动尽量错开。
+6. 不要把 `~/.crb/auth.json`、`~/.crb/profile.json` 的内容打印、上传或写进任何日志。
 
 ## 已知限制
 

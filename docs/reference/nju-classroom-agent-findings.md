@@ -124,7 +124,7 @@ querySetting=[]
 | `/jwapp/sys/jsjy/modules/jsjysq/cxjsjysq.do` | **列表查询**（同 `joinActionIdToDoUrl` 规律，实测通过，返回 `datas.cxjsjysq.rows`） |
 | `/jwapp/sys/jsjy/modules/jsjysq/xzjasjysq.do` | **新增/保存/提交借用申请** |
 | `/jwapp/sys/jsjy/modules/jsjysq/scjssq.do` | 删除借用申请 |
-| `/jwapp/sys/jsjy/modules/jsjysq/shjsjysq.do` | 审核 |
+| `/jwapp/sys/jsjy/modules/jsjysq/shjsjysq.do` | 撤回/审核（撤回：`SQBH`+`SHZT=1`+`JSJYSQLX=6`+`CQDQJY`） |
 | `/jwapp/sys/jsjy/modules/jsjysq/scjsdj.do` | 删除教室登记 |
 | `/jwapp/sys/jsjy/modules/gg/cxjskjxq.do` | 查询空闲教室（选择教室用） |
 
@@ -200,6 +200,18 @@ querySetting=[]
   - `SHZT == '1'`（撤回状态）→ 显示 `撤回 | 删除 | 提交 | 编辑`，其中 **“删除”按钮**：`data-x-wid = rowData.SQBH`、`data-action="删除"`。
   - `actionDelete` 实现：`bs.deleteJssq({param:'[{SQBH: ' + sqbh + '}]'})`，对应接口 **`POST /jwapp/sys/jsjy/modules/jsjysq/scjssq.do`**，body `param=[{SQBH:<申请编号>}]`。
 - **实测**：对草稿也直接调了 `scjssq.do`，返回 `msg:"操作成功"`，重新加载 jsjy 列表后 `totalSize:0`，**草稿确实被删除**。（此前“刷不出来”是页面刷新/缓存时机问题。）
+
+### 正式提交 / 撤回 / 编辑（均已实测）
+
+| 操作 | 接口 | 参数 | 说明 |
+|---|---|---|---|
+| 正式提交 | `POST /modules/jsjysq/xzjasjysq.do` | `param=[data]`，`TYPE='TJ'` | 保存草稿是同一接口 `TYPE='save'` |
+| 撤回 | `POST /modules/jsjysq/shjsjysq.do` | `SQBH`、`SHZT=1`、`JSJYSQLX=6`、`CQDQJY` | 撤回后 `SHZT` 变 `1` |
+| 删除 | `POST /modules/jsjysq/scjssq.do` | `param=[{SQBH:...}]` | |
+| 编辑 | `POST /modules/jsjysq/xzjasjysq.do` | 带上原记录 `WID`+`SQBH` 的完整表单 | **更新**而非新增，`TYPE` 决定草稿/提交 |
+
+状态机（`SHZT`）：`00` 草稿 → 提交 → `65` 待学生社团管理部审核 → 撤回 → `1` 已撤回 → 提交 → `65` …；`99` 已通过。
+前端按钮可见性：`SHZT=='00'` → 提交/编辑；`SHZT=='1'` → 删除/提交/编辑；未审核（非 00/1/999）→ 撤回/查看。
 
 ### 真实测试结果（更新）
 - 用 `TYPE='save'` 直接 POST `xzjasjysq.do`，服务端返回：

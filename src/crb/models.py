@@ -127,7 +127,7 @@ class Applicant(BaseModel):
     JYRXM: str = ""
     JYRDH: str = ""
     JSJYLXDM: str = "02"
-    campus: str = "3"
+    campus: str = ""  # 留空则由档案补齐，再回退 "3"
     building: str | None = None
     room_type: str | None = None
 
