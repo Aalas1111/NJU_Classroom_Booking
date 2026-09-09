@@ -1,0 +1,38 @@
+[project]
+name = "crb"
+version = "0.1.0"
+description = "CRB (ClassRoom Booking) — 南京大学教室借用自动化 CLI + Skill"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx[socks]>=0.27",
+    "pydantic>=2.7",
+    "rich>=13.7",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# 扫码/有头登录需要 Playwright（首次使用需 `uv run playwright install chromium`）
+login = ["playwright>=1.44"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+crb = "crb.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# B008：typer/click 的推荐写法就是在默认值里调用 Option，无需规避
+ignore = ["E501", "B008"]

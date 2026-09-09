@@ -1,0 +1,58 @@
+# ---- Python / uv ----
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- 本地敏感凭证（绝不入库）----
+.crb/
+auth.json
+*storage-state*.json
+nju-auth-state.json
+.env
+.env.*
+!.env.example
+
+# ---- Playwright ----
+.playwright-cli/
+*.playwright-profile/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Comet：仓库里只保留 Pi 的 skills，其它平台的目录由 `comet init` 重新生成 ----
+.agents/
+.amazonq/
+.augment/
+.bob/
+.claude/
+.cline/
+.codebuddy/
+.continue/
+.cospec/
+.crush/
+.cursor/
+.factory/
+.forge/
+.gemini/
+.github/skills/
+.iflow/
+.junie/
+.kilocode/
+.kiro/
+.lingma/
+.opencode/
+.qoder/
+.qwen/
+.roo/
+.trae/
+.windsurf/
