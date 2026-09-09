@@ -47,6 +47,15 @@ def _dump(obj: Any) -> None:
     console.print_json(json.dumps(obj, ensure_ascii=False, default=str))
 
 
+def _emit_result(res: api.SaveResult, json_out: bool) -> None:
+    """统一输出写操作结果（--json 时只输出 JSON）。"""
+    if json_out:
+        _dump({"ok": res.ok, "code": res.code, "msg": res.msg})
+        return
+    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
+    console.print(f"{mark} {res.msg or res.code}")
+
+
 def _session() -> Session:
     s = Session()
     try:
@@ -276,7 +285,7 @@ def plan(
 
     term = api.current_term(s)
     slots, rooms = planner.existing_usage(s, term)
-    if slots:
+    if slots and not json_out:
         console.print(f"[dim]已有申请 {len(slots)} 条，已纳入防重合检测[/dim]")
     assignments = planner.build_plan(
         s,
@@ -287,9 +296,7 @@ def plan(
         allow_overlap=allow_overlap,
     )
 
-    if json_out and not save:
-        _dump([a.model_dump(mode="json") for a in assignments])
-    else:
+    if not json_out:
         table = Table(title=f"教室借用方案（{len(assignments)} 条）")
         for col in ("活动", "日期", "节次", "人数", "教室", "容量", "状态"):
             table.add_column(col)
@@ -316,18 +323,27 @@ def plan(
             )
         console.print(table)
 
-    if not save and not submit:
-        console.print("[dim]（仅方案，未写入；加 --save 存草稿 / --submit 正式提交）[/dim]")
+    if not (save or submit):
+        if json_out:
+            _dump([a.model_dump(mode="json") for a in assignments])
+        else:
+            console.print("[dim]（仅方案，未写入；加 --save 存草稿 / --submit 正式提交）[/dim]")
         return
 
     results = planner.save_plan(
         s, assignments, applicant, room_in_purpose=room_in_purpose, submit=submit
     )
-    for r in results:
-        mark = "[green]✓[/green]" if r["ok"] else "[red]✗[/red]"
-        console.print(f"{mark} {r['title']} -> {r['msg']}")
     if json_out:
-        _dump(results)
+        _dump(
+            {
+                "assignments": [a.model_dump(mode="json") for a in assignments],
+                "results": results,
+            }
+        )
+    else:
+        for r in results:
+            mark = "[green]✓[/green]" if r["ok"] else "[red]✗[/red]"
+            console.print(f"{mark} {r['title']} -> {r['msg']}")
     if any(not r["ok"] for r in results):
         raise typer.Exit(1)
 
@@ -343,7 +359,9 @@ def borrow_list(
     term = term or api.current_term(s)
     rows = api.list_borrows(s, term)
     if json_out:
-        _dump([r.model_dump() for r in rows])
+        _dump(
+            [{k: v for k, v in r.model_dump().items() if v not in (None, "")} for r in rows]
+        )
         return
     if not rows:
         console.print("（暂无申请记录）")
@@ -392,11 +410,12 @@ def borrow_draft(
     for i, req in enumerate(reqs, 1):
         res = api.save_borrow(s, req, submit=submit)
         results.append({"index": i, "ok": res.ok, "code": res.code, "msg": res.msg})
-        mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
-        console.print(f"{mark} #{i} {req.JYYTMS[:24]} -> {res.msg or res.code}")
+        if not json_out:
+            mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
+            console.print(f"{mark} #{i} {req.JYYTMS[:24]} -> {res.msg or res.code}")
     if json_out:
         _dump(results)
-    if not submit:
+    elif not submit:
         console.print("[dim]（以上均为草稿，未正式提交）[/dim]")
     if any(not r["ok"] for r in results):
         raise typer.Exit(1)
@@ -405,17 +424,17 @@ def borrow_draft(
 @borrow_app.command("delete")
 def borrow_delete(
     sqbh: str = typer.Option(..., "--sqbh", help="申请编号（列表里的 SQBH）"),
+    json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """删除一条申请/草稿。"""
-    res = api.delete_borrow(_session(), sqbh)
-    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
-    console.print(f"{mark} {res.msg or res.code}")
+    _emit_result(api.delete_borrow(_session(), sqbh), json_out)
 
 
 @borrow_app.command("withdraw")
 def borrow_withdraw(
     sqbh: str = typer.Option(..., "--sqbh", help="申请编号 SQBH"),
     cqdqjy: str | None = typer.Option(None, "--cqdqjy", help="长期(1)/短期(2)，默认自动识别"),
+    json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """撤回一条已提交的申请（撤回后可编辑再提交）。"""
     s = _session()
@@ -424,14 +443,13 @@ def borrow_withdraw(
         err_console.print(f"[red]未找到申请：{sqbh}[/red]")
         raise typer.Exit(2)
     cq = cqdqjy or str(rec.get("CQDQJY") or "2")
-    res = api.withdraw_borrow(s, sqbh, cqdqjy=cq)
-    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
-    console.print(f"{mark} {res.msg or res.code}")
+    _emit_result(api.withdraw_borrow(s, sqbh, cqdqjy=cq), json_out)
 
 
 @borrow_app.command("submit")
 def borrow_submit(
     sqbh: str = typer.Option(..., "--sqbh", help="申请编号 SQBH"),
+    json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """把草稿/已撤回的申请正式提交（TYPE=TJ）。"""
     s = _session()
@@ -439,9 +457,7 @@ def borrow_submit(
     if rec is None:
         err_console.print(f"[red]未找到申请：{sqbh}[/red]")
         raise typer.Exit(2)
-    res = api.update_borrow(s, rec, submit=True)
-    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
-    console.print(f"{mark} {res.msg or res.code}")
+    _emit_result(api.update_borrow(s, rec, submit=True), json_out)
 
 
 @borrow_app.command("edit")
@@ -451,6 +467,7 @@ def borrow_edit(
         ..., "--data", help='要修改的字段 JSON，如 {"ZRS":"35","JYYTMS":"..."}'
     ),
     draft: bool = typer.Option(False, "--draft", help="只保存草稿，不提交"),
+    json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """修改一条已有申请（默认修改后重新提交）。"""
     try:
@@ -466,9 +483,7 @@ def borrow_edit(
     if rec is None:
         err_console.print(f"[red]未找到申请：{sqbh}[/red]")
         raise typer.Exit(2)
-    res = api.update_borrow(s, rec, submit=not draft, **changes)
-    mark = "[green]✓[/green]" if res.ok else "[red]✗[/red]"
-    console.print(f"{mark} {res.msg or res.code}")
+    _emit_result(api.update_borrow(s, rec, submit=not draft, **changes), json_out)
 
 
 def main() -> None:
