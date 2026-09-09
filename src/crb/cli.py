@@ -152,12 +152,22 @@ def profile_cmd(
 
 
 @app.command()
-def doctor() -> None:
+def doctor(json_out: bool = typer.Option(False, "--json")) -> None:
     """自检：登录态是否有效、能否取到当前学期与系统参数。"""
     s = _session()
     term = api.current_term(s)
     params = api.system_params(s)
     org = api.my_org(s)
+    info = {
+        "ok": bool(term),
+        "term": term,
+        "JSJYSFKT": params.get("JSJYSFKT"),
+        "JYSJFW": params.get("JYSJFW"),
+        "org": org.get("DWDM") or org.get("SZDWDM"),
+    }
+    if json_out:
+        _dump(info)
+        return
     console.print("[green]✓ 登录态可用[/green]")
     console.print(f"  当前学期：{term or '[red]获取失败[/red]'}")
     console.print(f"  借用开关 JSJYSFKT：{params.get('JSJYSFKT', '?')}")
@@ -245,6 +255,7 @@ def free(
 def plan(
     file: Path = typer.Option(..., "--file", "-f", help="活动列表 JSON 文件"),
     save: bool = typer.Option(False, "--save", help="把方案批量保存为草稿（默认只出方案）"),
+    submit: bool = typer.Option(False, "--submit", help="⚠️ 直接正式提交（默认只存草稿）"),
     room_in_purpose: bool = typer.Option(
         True,
         "--room-in-purpose/--no-room-in-purpose",
@@ -305,11 +316,13 @@ def plan(
             )
         console.print(table)
 
-    if not save:
-        console.print("[dim]（仅方案，未写入；加 --save 才会保存草稿）[/dim]")
+    if not save and not submit:
+        console.print("[dim]（仅方案，未写入；加 --save 存草稿 / --submit 正式提交）[/dim]")
         return
 
-    results = planner.save_plan(s, assignments, applicant, room_in_purpose=room_in_purpose)
+    results = planner.save_plan(
+        s, assignments, applicant, room_in_purpose=room_in_purpose, submit=submit
+    )
     for r in results:
         mark = "[green]✓[/green]" if r["ok"] else "[red]✗[/red]"
         console.print(f"{mark} {r['title']} -> {r['msg']}")

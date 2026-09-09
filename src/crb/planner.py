@@ -240,8 +240,9 @@ def save_plan(
     assignments: list[Assignment],
     applicant: Applicant,
     room_in_purpose: bool = True,
+    submit: bool = False,
 ) -> list[dict[str, Any]]:
-    """把方案批量保存为草稿，返回逐条结果。"""
+    """把方案批量保存为草稿（或直接提交），返回逐条结果。"""
     term = api.current_term(session)
     week_cache: dict[str, dict[str, Any]] = {}
     out: list[dict[str, Any]] = []
@@ -256,7 +257,7 @@ def save_plan(
             out.append({"title": a.activity.title, "ok": False, "msg": f"生成申请失败：{exc}"})
             continue
         a.request = req.as_payload()
-        res = api.save_borrow(session, req)
+        res = api.save_borrow(session, req, submit=submit)
         out.append({"title": a.activity.title, "ok": res.ok, "msg": res.msg or str(res.code)})
 
     return out

@@ -1,117 +1,126 @@
 ---
 name: crb
-description: 南京大学教室借用自动化（CRB = ClassRoom Booking）。当用户需要「查空闲教室 / 批量申请教室借用 / 查看或删除借用申请」时使用。通过本地 `crb` CLI 复用一次性登录态直连学校接口；默认只保存草稿，绝不擅自正式提交。
+description: 南京大学教室借用自动化（CRB = ClassRoom Booking）。当用户提到「nju / 南京大学 / 教室借用 / 借教室 / 空闲教室 / 教室申请 / 社团活动场地 / 训练营场地 / 撤回申请」等词，或需要查询空闲教室、批量提交教室借用申请、查看/撤回/修改申请时，强烈建议使用本 skill。通过本地 `crb` CLI 复用登录态直连学校办事大厅；默认只存草稿，正式提交必须用户明确授权。
 ---
 
-# CRB — 南京大学教室借用工具
+# CRB — 南京大学教室借用
 
-## 何时使用
+## 何时使用（触发词）
 
-用户提出以下任意需求时：
-
-- 查某个校区、某天、某节次有哪些空闲教室
-- 帮一批活动批量申请教室（社团例会、训练营、讲座等）
-- 查看 / 删除自己的教室借用申请
-- 需要把「自然语言描述的活动列表」变成学校系统里的借用申请
+出现以下任一意图时注入本 skill：
+`nju` / `南京大学` / `教室借用` / `借教室` / `空闲教室` / `教室申请` / `社团活动场地` / `训练营场地` / `借用申请` / `撤回申请`。
 
 ## 前置条件（一次性）
 
 ```bash
-uv sync --extra login                 # 安装依赖
-uv run crb login                      # 打开浏览器，用户自己扫码/输密码
+uv sync --extra login
+uv run crb login          # 打开浏览器扫码；顺便会问手机号，存进档案
 ```
 
-浏览器会自动回退：Playwright Chromium → 系统 Edge → 系统 Chrome。装了 Edge/Chrome 就无需下载浏览器；
-都没有时再执行 `uv run playwright install chromium`。也可用 `crb login --browser msedge` 指定。
+- 登录态 `~/.crb/auth.json`、档案 `~/.crb/profile.json`：**敏感文件，不要读取内容、不要上传、不要入库**。
+- 浏览器自动回退 Chromium → Edge → Chrome；都没有才需 `uv run playwright install chromium`。
 
-登录态默认保存在 `~/.crb/auth.json`（可用环境变量 `CRB_AUTH_FILE` 覆盖）。
-**这是敏感文件，不要读取内容、不要提交到 git、不要发给任何人。**
+## 命令
 
-## 命令一览
-
-所有命令加 `--json` 输出结构化数据（AI 优先用 `--json`）。
+一律加 `--json`，AI 读结构化结果。
 
 | 命令 | 作用 |
 |---|---|
-| `crb doctor` | 自检：登录态是否有效、当前学期、借用开关 |
-| `crb campus --json` | 校区字典（1 鼓楼 / 2 浦口 / 3 仙林 / 4 苏州） |
-| `crb buildings --campus 3 --json` | 教学楼字典 |
-| `crb free --campus 3 --date 2026-09-10 --period 1-2 --json` | 查空闲教室 |
-| `crb plan --file plan.json --json` | 批量规划（查教室 + 分配 + 冲突检测，只出方案） |
-| `crb plan --file plan.json --save` | 批量规划并保存草稿 |
-| `crb borrow list --json` | 查看我的申请（含 SQBH、审核状态 SHZT） |
-| `crb borrow draft --file reqs.json --json` | 批量保存草稿 |
-| `crb borrow draft --file reqs.json --submit` | ⚠️ 正式提交 |
-| `crb borrow withdraw --sqbh <SQBH>` | 撤回已提交申请 |
-| `crb borrow edit --sqbh <SQBH> --data '{...}'` | 修改并重新提交 |
-| `crb borrow submit --sqbh <SQBH>` | 草稿/已撤回 → 正式提交 |
-| `crb borrow draft --data '{...}'` | 保存单条草稿 |
-| `crb borrow delete --sqbh <SQBH>` | 删除申请/草稿 |
+| `crb doctor --json` | 自检：登录态、当前学期、借用开关、单位 |
+| `crb campus --json` | 校区：`1` 鼓楼 / `2` 浦口 / `3` 仙林 / `4` 苏州 |
+| `crb buildings --campus 4 --json` | 教学楼字典（返回 `JXLDM` + 名称） |
+| `crb free --campus 4 --date 2026-09-11 --period 7-8 --json` | 查空闲教室（可加 `-b <教学楼>`、`-t <教室类型>`） |
+| `crb plan --file plan.json --json` | 批量规划：查教室 + 分配 + 冲突检测（只出方案） |
+| `crb plan --file plan.json --save` | 批量存草稿 |
+| `crb plan --file plan.json --submit` | ⚠️ 批量正式提交 |
+| `crb borrow list --json` | 我的申请（`SQBH` / `SHZT`） |
+| `crb borrow withdraw --sqbh <SQBH>` | 撤回 |
+| `crb borrow edit --sqbh <SQBH> --data '{"ZRS":"35"}'` | 修改并重新提交 |
+| `crb borrow submit --sqbh <SQBH>` | 草稿/已撤回 → 提交 |
+| `crb borrow draft --file reqs.json --json` | 直接按申请数组存草稿（不走规划） |
+| `crb borrow delete --sqbh <SQBH>` | 删除 |
 
-## 典型批量流程（推荐 `crb plan`）
+## 节次时间（全校统一）
 
-1. 把用户给的活动列表整理成 plan JSON（格式见 `docs/批量规划设计.md` / `examples/plan.example.json`）：
-   每条含 `title / date / period / people`，可加 `preferred_room / building / room_type`，
-   `defaults` 里放借用人信息与默认校区。
-2. `crb plan --file plan.json --json` → 得到方案（自动查空闲教室、按容量过滤、批次内冲突检测）。
-3. 把方案汇报给用户确认（哪些 OK、哪些 `no_room` / `too_small`）。
-4. 用户确认后 `crb plan --file plan.json --save --json` 批量存草稿。
-5. 提醒用户去办事大厅确认后自行提交；清理用 `crb borrow delete --sqbh`。
+| 节 | 时间 | 节 | 时间 |
+|---|---|---|---|
+| 1 | 08:00-08:50 | 7 | 16:10-17:00 |
+| 2 | 09:00-09:50 | 8 | 17:10-18:00 |
+| 3 | 10:10-11:00 | 9 | 18:30-19:20 |
+| 4 | 11:10-12:00 | 10 | 19:30-20:20 |
+| 5 | 14:00-14:50 | 11 | 20:30-21:20 |
+| 6 | 15:00-15:50 | 12 | 21:30-22:20 |
 
-> 学生端不能指定具体教室，`preferred_room` 只会写进用途描述（「意向：xxx」）和备注，不保证借到。
+「下午 4 点后」→ 第 7 节起；「晚上 7 点」→ 第 9 节；以此类推。
 
-### 直接给 `borrow draft` 喂申请数组
+## 完整范例
 
-1. 把用户给的活动列表整理成 JSON 数组（见下方 schema）。
-2. 对每个活动的日期先 `crb free` 查空闲教室，挑出满足人数/楼栋偏好的教室。
-3. 生成 `reqs.json`，运行 `crb borrow draft --file reqs.json --json`。
-4. 把结果（成功/失败、SQBH）汇报给用户，让用户去办事大厅确认后自行提交。
+> 用户：「周五下午 4 点后在苏州校区南雍楼借两间教室，社团分享，30 人和 20 人各一场」
 
-### `borrow draft` 输入 schema（数组元素）
+**1) 确认登录态 / 学期 / 单位**
+
+```bash
+uv run crb doctor --json
+# {"ok":true,"term":"2026-2027-1","JSJYSFKT":"1","JYSJFW":"2026-08-21,2026-12-28","org":"400760"}
+```
+
+**2) 查教学楼代码**
+
+```bash
+uv run crb buildings --campus 4 --json
+# [{"JXLDM":"S06","JXLMC":"南雍楼"},{"JXLDM":"S01","JXLMC":"公共教学楼"}]
+```
+
+**3) （可选）先探该时段教室**
+
+```bash
+uv run crb free --campus 4 --date 2026-09-11 --period 7-8 -b S06 --json
+# [{"JASMC":"南雍-西108","KXJC":"7-8节","KXSJ":"16:10-17:00,17:10-18:00","SKZWS":58}, ...]
+```
+
+**4) 写 `plan.json`**（「周五」→ `2026-09-11`；「下午4点后」→ `period 7-8`；人数 → `people`）
 
 ```json
 {
-  "JYYTMS": "学生社团例会",              // 必填：借用用途
-  "JYDWDM": "400760",                   // 单位代码（`crb doctor` 可查）
-  "JYRXM": "李赫",                       // 借用人
-  "JYRDH": "13800000000",                // 联系电话
-  "JSJYLXDM": "02",                     // 借用类型（见下）
-  "XXXQDM": "3",                        // 校区
-  "KSRQ": "2026-09-10",                 // 开始日期
-  "JSRQ": "2026-09-10",                 // 结束日期
-  "ZC": "3",                            // 周次
-  "XQ": "4",                            // 星期（1-7）
-  "KSJC": "1",                          // 开始节次
-  "JSJC": "2",                          // 结束节次
-  "ZRS": "30",                          // 总人数
-  "JSRL": "60"                          // 教室容量
+  "defaults": { "campus": "4", "building": "S06", "JSJYLXDM": "02" },
+  "activities": [
+    { "title": "社团分享（第一场）", "date": "2026-09-11", "period": "7-8", "people": 30 },
+    { "title": "社团分享（第二场）", "date": "2026-09-11", "period": "7-8", "people": 20 }
+  ]
 }
 ```
 
-固定字段（代码会自动补）：`JYLYDM=02`、`JSJYSQLX=2`、`CQDQJY=2`、`TYPE=save`。
+**5) 出方案，汇报给用户确认**（两场会自动分到不同教室，防重合）
+
+```bash
+uv run crb plan --file plan.json --json
+```
+
+**6) 用户确认后落库**
+
+```bash
+uv run crb plan --file plan.json --save --json     # 草稿（默认）
+uv run crb plan --file plan.json --submit --json   # ⚠️ 正式提交，需用户明确授权
+```
+
+**7) 提醒用户**：提交后需联系指导老师初审（使用日期前至少 1 个工作日；周末教室需周五 16:00 前完成初审）。
 
 ## 关键字典
 
 - 校区：`1` 鼓楼 / `2` 浦口 / `3` 仙林 / `4` 苏州
 - 借用类型 `JSJYLXDM`：`01` 辅导员、`02` 学生社团管理部、`03` 就业指导中心、`04` 国际合作与交流处、`05` 学生工作处、`06` 校团委、`13` 待悦读课程管理
-- 节次：`1` 08:00-08:50、`2` 09:00-09:50 ……（以系统为准）
-- 审核状态 `SHZT`：`00` 草稿、`1` 撤回（此时前端才显示删除按钮）
+- 状态 `SHZT`：`00` 草稿、`65` 待审核、`1` 已撤回、`99` 已通过
 
-## 硬性规则（务必遵守）
+## 硬性规则
 
-1. **默认只存草稿**（`TYPE=save`）。**任何正式提交都必须由用户显式要求并再次确认。**
-   正式提交用 `--submit` / `crb borrow submit`；撤回用 `crb borrow withdraw`。
-2. 不要在真实系统里制造垃圾数据；测试产生的草稿必须用 `crb borrow delete --sqbh` 清理。
-3. 批量操作前先用 `crb doctor` 确认登录态，失败就提示用户重新 `crb login`。
-4. `crb plan` 会自动读「我的申请」做跨批次防重合：
-   - 与自己已有申请时间重叠 → 标记 `duplicate` 并跳过；
-   - 从备注 `FJ` 读取已用教室，避免重复选同一间。
-   确实需要重叠时用 `--allow-overlap`。
-5. 申请时间冲突要自己检查：同一教室同一节次不要重复申请；同一批活动尽量错开。
-6. 不要把 `~/.crb/auth.json`、`~/.crb/profile.json` 的内容打印、上传或写进任何日志。
+1. **默认只存草稿**；正式提交必须用户明确要求并再次确认（`--submit` / `crb borrow submit`）。
+2. 不制造垃圾数据；测试草稿用 `crb borrow delete --sqbh` 清理。
+3. 批量操作前先 `crb doctor --json`；登录失效就提示用户 `crb login`。
+4. `crb plan` 自动做跨批次防重合：与自己已有申请时间重叠 → `duplicate` 跳过；从备注 `FJ` 读取已用教室避免重复选同一间。确需重叠用 `--allow-overlap`。
+5. 学生端不能指定教室，`preferred_room` 只写进用途描述（「意向：xxx」），不保证借到。
+6. 不要输出 `auth.json` / `profile.json` 的内容。
 
-## 已知限制
+## 限制
 
-- 正式提交（`--submit`）已实现但默认关闭，需要用户明确授权后再用。
-- 教师端入口与学生端不同，当前版本仅覆盖学生端。
-- 空闲教室接口返回的字段里没有楼层/教室代码，只有教室名称（`JASMC`）。
+- 仅覆盖学生端（教师端入口不同）。
+- 空闲教室只返回教室名，没有楼层/教室代码。
