@@ -77,6 +77,35 @@ def test_auth_cookies_rejects_unauthenticated() -> None:
     assert _auth_cookies(fake) == (False, False)
 
 
+class _FakeSession:
+    def __init__(self) -> None:
+        self.last: tuple | None = None
+
+    def post_form(self, path, data=None):
+        self.last = (path, data)
+        return {"datas": {"xzjasjysq": {"extParams": {"code": 1, "msg": "ok"}}}}
+
+
+def test_update_borrow_maps_list_aliases() -> None:
+    """列表记录用 JASJYLXDM，申请表要 JSJYLXDM；缺失字段用默认值兜底。"""
+    import json
+
+    from crb import api
+
+    sess = _FakeSession()
+    rec = BorrowRecord.model_validate(
+        {"WID": "w1", "SQBH": "s1", "JASJYLXDM": "02", "JYYTMS": "x", "ZRS": "30"}
+    )
+    res = api.update_borrow(sess, rec, submit=True, ZRS="35")
+    assert res.ok
+    payload = json.loads(sess.last[1]["param"])[0]  # type: ignore[index]
+    assert payload["JSJYLXDM"] == "02"  # 别名映射
+    assert payload["ZRS"] == "35"  # 修改生效
+    assert payload["TYPE"] == "TJ"
+    assert payload["WID"] == "w1" and payload["SQBH"] == "s1"
+    assert payload["JSJYSQLX"] == 2  # 默认值兜底
+
+
 def test_session_rejects_incomplete_state(tmp_path) -> None:
     from crb.session import NotLoggedInError, Session
 

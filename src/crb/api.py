@@ -32,8 +32,8 @@ from .config import (
 from .models import BorrowRecord, BorrowRequest, Building, Campus, FreeRoomSlot, SaveResult
 from .session import Session
 
-# 借用申请表真正需要的字段（用于从列表记录反向构造申请）
-_REQUEST_FIELDS = list(BorrowRequest.model_fields.keys())
+# 列表记录字段名 -> 申请表字段名（学校列表用的是另一套别名）
+_ALIASES = {"JASJYLXDM": "JSJYLXDM"}
 
 
 # ---------------------------------------------------------------- 基础工具
@@ -243,7 +243,13 @@ def update_borrow(
     base: dict[str, Any] = (
         record.model_dump() if hasattr(record, "model_dump") else dict(record)
     )
-    data = {k: base.get(k) for k in _REQUEST_FIELDS if base.get(k) is not None}
+    # 先用申请表默认值兜底，再用记录里有的字段覆盖（含别名映射），
+    # 否则缺失字段（如 JSJYLXDM）会导致后端“新增失败”
+    data = BorrowRequest().as_payload()
+    for k, v in base.items():
+        key = _ALIASES.get(k, k)
+        if key in data and v not in (None, ""):
+            data[key] = v
     data.update({k: v for k, v in changes.items() if v is not None})
     data["WID"] = base.get("WID")
     data["SQBH"] = base.get("SQBH")
