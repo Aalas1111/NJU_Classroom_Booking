@@ -41,9 +41,7 @@ def test_capacity_and_conflict() -> None:
 
 def test_apply_profile() -> None:
     a = Applicant()
-    planner.apply_profile(
-        a, {"JYDWDM": "400760", "JYRXM": "李赫", "JYRDH": "173", "campus": "4"}
-    )
+    planner.apply_profile(a, {"JYDWDM": "400760", "JYRXM": "李赫", "JYRDH": "173", "campus": "4"})
     assert a.JYDWDM == "400760"
     assert a.JYRXM == "李赫"
     assert a.JYRDH == "173"
@@ -83,9 +81,7 @@ def test_build_plan_flags_duplicate(monkeypatch) -> None:
 
 
 def test_build_plan_avoids_existing_room(monkeypatch) -> None:
-    monkeypatch.setattr(
-        planner.api, "free_rooms", lambda *a, **k: [_slot("A", 50), _slot("B", 60)]
-    )
+    monkeypatch.setattr(planner.api, "free_rooms", lambda *a, **k: [_slot("A", 50), _slot("B", 60)])
     acts = [Activity(title="x", date="2026-09-10", period="1-2", people=10)]
     res = planner.build_plan(
         None,  # type: ignore[arg-type]

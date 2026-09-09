@@ -15,8 +15,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import api, auth, planner
+from . import __version__, api, auth, planner
 from . import profile as profile_mod
+from . import skill as skill_mod
 from .config import CAMPUSES
 from .models import BorrowRequest
 from .session import NotLoggedInError, Session, WafBlockedError
@@ -37,6 +38,8 @@ app = typer.Typer(
 )
 borrow_app = typer.Typer(no_args_is_help=True, help="教室借用申请：草稿 / 查询 / 删除")
 app.add_typer(borrow_app, name="borrow")
+skill_app = typer.Typer(no_args_is_help=True, help="内置 AI Skill：查看 / 安装")
+app.add_typer(skill_app, name="skill")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -69,6 +72,61 @@ def _session() -> Session:
 def _parse_period(text: str) -> tuple[int, int]:
     """兼容旧调用，已统一到 utils.parse_period。"""
     return parse_period(text)
+
+
+# ---------------------------------------------------------------- 全局选项
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"crb {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="显示版本并退出",
+        is_eager=True,
+        callback=_version_callback,
+    ),
+) -> None:
+    """CRB — 南京大学教室借用自动化工具（默认只保存草稿，不正式提交）。"""
+    del version  # 由 _version_callback 处理
+
+
+# ---------------------------------------------------------------- Skill
+@skill_app.command("path")
+def skill_path_cmd() -> None:
+    """打印内置 SKILL.md 的路径。"""
+    console.print(str(skill_mod.skill_path()))
+
+
+@skill_app.command("show")
+def skill_show_cmd() -> None:
+    """原样打印内置 SKILL.md 内容（便于重定向到文件）。"""
+    text = skill_mod.skill_text()
+    sys.stdout.write(text if text.endswith("\n") else f"{text}\n")
+
+
+@skill_app.command("install")
+def skill_install_cmd(
+    directory: Path = typer.Option(
+        Path(".pi/skills"),
+        "--dir",
+        "-d",
+        help="AI harness 的 skills 根目录（如 .pi/skills、~/.claude/skills）",
+    ),
+    force: bool = typer.Option(False, "--force", "-f", help="已存在时覆盖"),
+) -> None:
+    """把内置 skill 安装到 <dir>/crb/SKILL.md。"""
+    try:
+        dest = skill_mod.install(directory, force=force)
+    except FileExistsError as exc:
+        err_console.print(f"[red]已存在：{exc}（加 --force 覆盖）[/red]")
+        raise typer.Exit(2) from exc
+    console.print(f"[green]✓[/green] skill 已安装：{dest}")
 
 
 # ---------------------------------------------------------------- 登录 / 自检
@@ -359,9 +417,7 @@ def borrow_list(
     term = term or api.current_term(s)
     rows = api.list_borrows(s, term)
     if json_out:
-        _dump(
-            [{k: v for k, v in r.model_dump().items() if v not in (None, "")} for r in rows]
-        )
+        _dump([{k: v for k, v in r.model_dump().items() if v not in (None, "")} for r in rows])
         return
     if not rows:
         console.print("（暂无申请记录）")
@@ -398,9 +454,7 @@ def _load_requests(file: Path | None, data: str | None) -> list[BorrowRequest]:
 def borrow_draft(
     file: Path | None = typer.Option(None, "--file", "-f", help="申请数据 JSON 文件（数组）"),
     data: str | None = typer.Option(None, "--data", help="单条申请 JSON 字符串"),
-    submit: bool = typer.Option(
-        False, "--submit", help="⚠️ 正式提交（默认关闭，仅保存草稿）"
-    ),
+    submit: bool = typer.Option(False, "--submit", help="⚠️ 正式提交（默认关闭，仅保存草稿）"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """批量保存教室借用申请草稿（默认不提交）。"""

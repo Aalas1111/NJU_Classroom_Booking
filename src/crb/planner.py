@@ -82,7 +82,9 @@ def existing_usage(
             a1, a2 = int(ks), int(js)
         except (TypeError, ValueError):
             continue
-        slots.append((str(day), a1, a2, f"{r.get('SQBH')}({r.get('SHZT_DISPLAY') or r.get('SHZT')})"))
+        slots.append(
+            (str(day), a1, a2, f"{r.get('SQBH')}({r.get('SHZT_DISPLAY') or r.get('SHZT')})")
+        )
         room = str(r.get("FJ") or "").strip()
         if room:
             rooms.setdefault((room, str(day)), []).append((a1, a2))

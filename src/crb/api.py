@@ -240,9 +240,7 @@ def update_borrow(
 
     实测：带上原记录的 `WID`/`SQBH` 调 `xzjasjysq.do` 会**更新**而不是新增。
     """
-    base: dict[str, Any] = (
-        record.model_dump() if hasattr(record, "model_dump") else dict(record)
-    )
+    base: dict[str, Any] = record.model_dump() if hasattr(record, "model_dump") else dict(record)
     # 先用申请表默认值兜底，再用记录里有的字段覆盖（含别名映射），
     # 否则缺失字段（如 JSJYLXDM）会导致后端“新增失败”
     data = BorrowRequest().as_payload()
