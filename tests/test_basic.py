@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from crb import api
 from crb.cli import _parse_period
-from crb.models import BorrowRequest, FreeRoomSlot
+from crb.models import BorrowRecord, BorrowRequest, FreeRoomSlot
 
 
 def test_term_parts() -> None:
