@@ -8,6 +8,7 @@
 ![python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![code style](https://img.shields.io/badge/code%20style-ruff-000000)
+[![CI](https://github.com/Aalas1111/NJU_Classroom_Booking/actions/workflows/ci.yml/badge.svg)](https://github.com/Aalas1111/NJU_Classroom_Booking/actions/workflows/ci.yml)
 
 ---
 
@@ -79,13 +80,14 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ## 安装
 
-> 当前版本的正式分发渠道是**源码安装**（PyPI 尚未发布）。发行物为仓库 `dist/` 下的
-> `crb-0.0.0-py3-none-any.whl` 与 `crb-0.0.0.tar.gz`，也可用 `uv build` 自行构建。
+> 当前版本**未发布到 PyPI**。发行物见 [Releases](https://github.com/Aalas1111/NJU_Classroom_Booking/releases/latest)
+> （`crb-0.0.0-py3-none-any.whl` / `crb-0.0.0.tar.gz`），也可从源码安装或自行 `uv build`。
 
 ### 方式一：从源码安装为全局命令（推荐）
 
 ```bash
-git clone <本仓库地址> && cd NJU_Classroom_Booking
+git clone https://github.com/Aalas1111/NJU_Classroom_Booking.git
+cd NJU_Classroom_Booking
 uv tool install ".[login]"     # 安装 `crb` 命令 + 登录所需的 Playwright
 crb --version                  # crb 0.0.0
 ```
@@ -99,6 +101,7 @@ pipx install ".[login]"
 ### 方式三：直接用 wheel
 
 ```bash
+# 从 https://github.com/Aalas1111/NJU_Classroom_Booking/releases/latest 下载后
 uv tool install "dist/crb-0.0.0-py3-none-any.whl"
 # 登录功能需要额外装 Playwright：
 uv tool install "dist/crb-0.0.0-py3-none-any.whl" --with playwright
