@@ -15,10 +15,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import api, auth
+from . import api, auth, planner
 from .config import CAMPUSES
 from .models import BorrowRequest
 from .session import NotLoggedInError, Session
+from .utils import parse_period
 
 # Windows 控制台默认 GBK，会导致中文乱码；强制 UTF-8 输出。
 for _stream in (sys.stdout, sys.stderr):
@@ -56,12 +57,8 @@ def _session() -> Session:
 
 
 def _parse_period(text: str) -> tuple[int, int]:
-    """"1" -> (1,1)；"1-2" -> (1,2)。"""
-    if "-" in text:
-        a, b = text.split("-", 1)
-    else:
-        a = b = text
-    return int(a), int(b)
+    """兼容旧调用，已统一到 utils.parse_period。"""
+    return parse_period(text)
 
 
 # ---------------------------------------------------------------- 登录 / 自检
@@ -169,6 +166,69 @@ def free(
         )
     console.print(table)
     console.print(f"共 {len(rooms)} 间")
+
+
+# ---------------------------------------------------------------- 批量规划
+@app.command()
+def plan(
+    file: Path = typer.Option(..., "--file", "-f", help="活动列表 JSON 文件"),
+    save: bool = typer.Option(False, "--save", help="把方案批量保存为草稿（默认只出方案）"),
+    room_in_purpose: bool = typer.Option(
+        True,
+        "--room-in-purpose/--no-room-in-purpose",
+        help="是否把意向教室写进用途描述",
+    ),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """批量规划：查空闲教室 → 分配 → 冲突检测 →（可选）批量存草稿。"""
+    s = _session()
+    applicant, activities = planner.load_plan(file)
+    if not activities:
+        err_console.print("[red]活动列表为空[/red]")
+        raise typer.Exit(2)
+
+    assignments = planner.build_plan(s, activities, applicant)
+
+    if json_out and not save:
+        _dump([a.model_dump(mode="json") for a in assignments])
+    else:
+        table = Table(title=f"教室借用方案（{len(assignments)} 条）")
+        for col in ("活动", "日期", "节次", "人数", "教室", "容量", "状态"):
+            table.add_column(col)
+        for a in assignments:
+            room = a.room.room_name if a.room else ""
+            cap = (a.room.seat_class or a.room.seat_exam) if a.room else ""
+            mark = {
+                "ok": "[green]OK[/green]",
+                "no_room": "[red]无教室[/red]",
+                "too_small": "[yellow]容量不足[/yellow]",
+                "error": "[red]错误[/red]",
+            }.get(a.status, a.status)
+            if a.note:
+                mark += f" {a.note}"
+            table.add_row(
+                a.activity.title,
+                a.activity.date,
+                a.activity.period,
+                str(a.activity.people),
+                room,
+                str(cap or ""),
+                mark,
+            )
+        console.print(table)
+
+    if not save:
+        console.print("[dim]（仅方案，未写入；加 --save 才会保存草稿）[/dim]")
+        return
+
+    results = planner.save_plan(s, assignments, applicant, room_in_purpose=room_in_purpose)
+    for r in results:
+        mark = "[green]✓[/green]" if r["ok"] else "[red]✗[/red]"
+        console.print(f"{mark} {r['title']} -> {r['msg']}")
+    if json_out:
+        _dump(results)
+    if any(not r["ok"] for r in results):
+        raise typer.Exit(1)
 
 
 # ---------------------------------------------------------------- 借用申请

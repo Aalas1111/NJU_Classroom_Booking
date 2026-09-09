@@ -75,6 +75,8 @@ uv run crb doctor                                  # 自检
 uv run crb campus                                  # 校区
 uv run crb buildings --campus 3                    # 仙林教学楼
 uv run crb free --campus 3 --date 2026-09-10 -p 1-2 --json   # 查空闲教室
+uv run crb plan --file examples/plan.example.json             # 批量规划（只出方案）
+uv run crb plan --file examples/plan.example.json --save      # 批量规划并存草稿
 uv run crb borrow list --json                      # 我的申请
 uv run crb borrow draft --file reqs.json --json    # 批量存草稿
 uv run crb borrow delete --sqbh <SQBH>             # 删除申请/草稿
@@ -83,6 +85,18 @@ uv run crb borrow delete --sqbh <SQBH>             # 删除申请/草稿
 所有命令都支持 `--json`，便于脚本和 AI 消费。
 
 ### 批量申请数据格式
+
+推荐用 `crb plan`（自动查空闲教室 + 分配 + 冲突检测）：
+
+```bash
+uv run crb plan --file examples/plan.example.json          # 先看方案
+uv run crb plan --file examples/plan.example.json --save   # 确认后存草稿
+```
+
+`plan` 文件格式见 [examples/plan.example.json](examples/plan.example.json) 与
+[docs/批量规划设计.md](docs/批量规划设计.md)。
+
+也可以跳过规划，直接给 `borrow draft` 喂申请数组：
 
 `reqs.json` 是一个数组，每个元素是一条申请，字段见
 [`.pi/skills/crb/SKILL.md`](.pi/skills/crb/SKILL.md)。最小示例：

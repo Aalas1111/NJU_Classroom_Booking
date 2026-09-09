@@ -37,12 +37,26 @@ uv run crb login                      # 打开浏览器，用户自己扫码/输
 | `crb campus --json` | 校区字典（1 鼓楼 / 2 浦口 / 3 仙林 / 4 苏州） |
 | `crb buildings --campus 3 --json` | 教学楼字典 |
 | `crb free --campus 3 --date 2026-09-10 --period 1-2 --json` | 查空闲教室 |
+| `crb plan --file plan.json --json` | 批量规划（查教室 + 分配 + 冲突检测，只出方案） |
+| `crb plan --file plan.json --save` | 批量规划并保存草稿 |
 | `crb borrow list --json` | 查看我的申请（含 SQBH、审核状态 SHZT） |
 | `crb borrow draft --file reqs.json --json` | 批量保存草稿 |
 | `crb borrow draft --data '{...}'` | 保存单条草稿 |
 | `crb borrow delete --sqbh <SQBH>` | 删除申请/草稿 |
 
-## 典型批量流程
+## 典型批量流程（推荐 `crb plan`）
+
+1. 把用户给的活动列表整理成 plan JSON（格式见 `docs/批量规划设计.md` / `examples/plan.example.json`）：
+   每条含 `title / date / period / people`，可加 `preferred_room / building / room_type`，
+   `defaults` 里放借用人信息与默认校区。
+2. `crb plan --file plan.json --json` → 得到方案（自动查空闲教室、按容量过滤、批次内冲突检测）。
+3. 把方案汇报给用户确认（哪些 OK、哪些 `no_room` / `too_small`）。
+4. 用户确认后 `crb plan --file plan.json --save --json` 批量存草稿。
+5. 提醒用户去办事大厅确认后自行提交；清理用 `crb borrow delete --sqbh`。
+
+> 学生端不能指定具体教室，`preferred_room` 只会写进用途描述（「意向：xxx」）和备注，不保证借到。
+
+### 直接给 `borrow draft` 喂申请数组
 
 1. 把用户给的活动列表整理成 JSON 数组（见下方 schema）。
 2. 对每个活动的日期先 `crb free` 查空闲教室，挑出满足人数/楼栋偏好的教室。

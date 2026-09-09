@@ -1,0 +1,16 @@
+{
+  "defaults": {
+    "JYDWDM": "400760",
+    "JYRXM": "李赫",
+    "JYRDH": "13800000000",
+    "JSJYLXDM": "02",
+    "campus": "3"
+  },
+  "activities": [
+    { "title": "学生社团例会", "date": "2026-09-10", "period": "1-2", "people": 30 },
+    { "title": "思维训练营（上午）", "date": "2026-09-10", "period": "1-2", "people": 60 },
+    { "title": "主题讲座", "date": "2026-09-10", "period": "3-4", "people": 120 },
+    { "title": "小型讨论", "date": "2026-09-10", "period": "5-6", "people": 10, "preferred_room": "仙Ⅰ-102" },
+    { "title": "超大活动", "date": "2026-09-10", "period": "7-8", "people": 999 }
+  ]
+}

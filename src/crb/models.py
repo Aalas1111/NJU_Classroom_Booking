@@ -100,3 +100,43 @@ class BorrowRecord(BaseModel):
 
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
+
+
+class Activity(BaseModel):
+    """一条待申请的活动（自然语言/表格整理后的结构化输入）。"""
+
+    title: str
+    date: str
+    period: str = "1-2"
+    people: int = 0
+    campus: str | None = None
+    building: str | None = None
+    room_type: str | None = None
+    preferred_room: str | None = None
+    # 可选：覆盖 defaults 里的借用人信息
+    JYDWDM: str | None = None
+    JYRXM: str | None = None
+    JYRDH: str | None = None
+    JSJYLXDM: str | None = None
+
+
+class Applicant(BaseModel):
+    """借用人/单位默认信息（来自 plan 文件的 defaults）。"""
+
+    JYDWDM: str = ""
+    JYRXM: str = ""
+    JYRDH: str = ""
+    JSJYLXDM: str = "02"
+    campus: str = "3"
+    building: str | None = None
+    room_type: str | None = None
+
+
+class Assignment(BaseModel):
+    """一条活动的分配结果。"""
+
+    activity: Activity
+    room: FreeRoomSlot | None = None
+    status: str = "ok"  # ok / no_room / too_small / error
+    note: str = ""
+    request: dict[str, Any] | None = None  # 生成的借用申请（--save 用）
