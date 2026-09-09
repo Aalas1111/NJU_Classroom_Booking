@@ -18,9 +18,11 @@ description: 南京大学教室借用自动化（CRB = ClassRoom Booking）。�
 
 ```bash
 uv sync --extra login                 # 安装依赖
-uv run playwright install chromium    # 登录需要 Chromium
 uv run crb login                      # 打开浏览器，用户自己扫码/输密码
 ```
+
+浏览器会自动回退：Playwright Chromium → 系统 Edge → 系统 Chrome。装了 Edge/Chrome 就无需下载浏览器；
+都没有时再执行 `uv run playwright install chromium`。也可用 `crb login --browser msedge` 指定。
 
 登录态默认保存在 `~/.crb/auth.json`（可用环境变量 `CRB_AUTH_FILE` 覆盖）。
 **这是敏感文件，不要读取内容、不要提交到 git、不要发给任何人。**

@@ -40,16 +40,24 @@ uv sync
 
 `uv sync` 会自动创建 `.venv/` 并按 `pyproject.toml` 安装依赖。
 
-### 3. 安装浏览器（仅登录需要）
+### 3. 浏览器（仅登录需要，可跳过）
+
+`crb login` 会**自动按顺序尝试**：Playwright 自带的 Chromium → 系统 Edge → 系统 Chrome。
+只要电脑上装了 Edge 或 Chrome（Windows 一般自带 Edge），就**无需下载**。
+
+如果三者都没有，再下载 Playwright Chromium：
 
 ```bash
 uv run playwright install chromium
 ```
 
+也可手动指定：`uv run crb login --browser msedge`（可选 `auto`/`chromium`/`msedge`/`chrome`）。
+
 ### 4. 首次登录
 
 ```bash
-uv run crb login
+uv run crb login                   # 自动选浏览器（Chromium -> Edge -> Chrome）
+uv run crb login --browser msedge  # 指定用系统 Edge
 ```
 
 会弹出一个有头浏览器，请在官方页面完成南京大学统一身份认证（扫码或账号密码）。

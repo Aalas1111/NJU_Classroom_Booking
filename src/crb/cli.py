@@ -82,9 +82,20 @@ def _parse_period(text: str | None) -> tuple[int, int] | None:
 
 # ---------------------------------------------------------------- 登录 / 自检
 @app.command()
-def login() -> None:
+def login(
+    browser: str = typer.Option(
+        "auto",
+        "--browser",
+        "-b",
+        help="浏览器：auto / chromium / msedge / chrome",
+    ),
+    timeout: int = typer.Option(300, "--timeout", help="等待登录完成的秒数"),
+) -> None:
     """打开浏览器完成一次统一身份认证，并持久化登录态。"""
-    auth.login()
+    if browser not in auth.BROWSER_CHOICES:
+        err_console.print(f"[red]--browser 只能是：{' / '.join(auth.BROWSER_CHOICES)}[/red]")
+        raise typer.Exit(2)
+    auth.login(timeout=timeout, browser=browser)
 
 
 @app.command()
