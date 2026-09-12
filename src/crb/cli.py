@@ -18,6 +18,7 @@ from rich.table import Table
 from . import __version__, api, auth, planner
 from . import profile as profile_mod
 from . import skill as skill_mod
+from .browser import BROWSER_CHOICES
 from .config import CAMPUSES
 from .models import BorrowRequest
 from .session import NotLoggedInError, Session, WafBlockedError
@@ -143,8 +144,8 @@ def login(
     name: str | None = typer.Option(None, "--name", help="借用人姓名"),
 ) -> None:
     """打开浏览器完成一次统一身份认证，并持久化登录态；顺便采集借用人档案。"""
-    if browser not in auth.BROWSER_CHOICES:
-        err_console.print(f"[red]--browser 只能是：{' / '.join(auth.BROWSER_CHOICES)}[/red]")
+    if browser not in BROWSER_CHOICES:
+        err_console.print(f"[red]--browser 只能是：{' / '.join(BROWSER_CHOICES)}[/red]")
         raise typer.Exit(2)
     auth.login(timeout=timeout, browser=browser)
     _collect_profile(phone, name)

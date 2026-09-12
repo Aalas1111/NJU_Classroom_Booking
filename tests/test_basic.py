@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typer.testing import CliRunner
+
 from crb import api
 from crb.cli import _parse_period
 from crb.models import BorrowRecord, BorrowRequest, FreeRoomSlot
@@ -118,3 +120,14 @@ def test_session_rejects_incomplete_state(tmp_path) -> None:
         pass
     else:  # pragma: no cover
         raise AssertionError("应当拒绝没有认证 Cookie 的登录态")
+
+
+def test_login_rejects_bad_browser_option() -> None:
+    """回归：BROWSER_CHOICES 定义在 browser.py，cli 曾经误从 auth 取导致 AttributeError。"""
+    from crb.browser import BROWSER_CHOICES
+    from crb.cli import app
+
+    result = CliRunner().invoke(app, ["login", "--browser", "not-a-browser"])
+    assert result.exit_code == 2
+    for name in BROWSER_CHOICES:
+        assert name in result.output
