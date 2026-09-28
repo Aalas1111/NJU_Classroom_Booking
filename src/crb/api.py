@@ -9,8 +9,11 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date as _date
 from typing import Any
+
+import httpx
 
 from .config import (
     CAMPUSES,
@@ -29,6 +32,7 @@ from .config import (
     EP_SYS_PARAMS,
     EP_TERM,
     EP_WITHDRAW,
+    JY_ENTRY,
     ROLE_LABELS,
     ROLE_STUDENT,
     ROLE_TEACHER,
@@ -132,6 +136,42 @@ def my_org(session: Session) -> dict[str, Any]:
     if r.get("SZDWDM") and not r.get("DWDM"):
         r["DWDM"] = r["SZDWDM"]
     return r
+
+
+#: 应用页里那段前端初始化配置：姓名、用户号都在里头。
+_JW_CONFIG_RE = re.compile(r"_JW_INIT_CONFIG\s*=\s*(\{.*?\});", re.S)
+
+
+def account_identity(session: Session, path: str = JY_ENTRY) -> dict[str, str]:
+    """当前账号的**姓名**与用户号 —— 学校页面上带着，`cxyhszdw.do` 只给单位。
+
+    为什么需要它：借用申请里的「借用人」「借用单位」是**要填**的。实测（2026-09-28）：
+    什么都不填去提交，学校**照样收，但存成空**（回读 JYRXM/JYDWDM 都是 null）——
+    学校表单里那两份是**前端**拿账号信息自动填好的，我们直连接口就得自己填。
+    名字藏在应用页的 `_JW_INIT_CONFIG.username` 里（学生号实测 `李赫`）。
+
+    读不到就回空串（**别猜**）：这只是把账号信息搬过来，不是必填项，
+    调用方该怎么兜底由它自己决定。
+    """
+    try:
+        resp = session.client.get(path)
+    except httpx.HTTPError:
+        return {}
+    if resp.status_code != 200:
+        return {}
+    found = _JW_CONFIG_RE.search(resp.text or "")
+    if not found:
+        return {}
+    try:
+        data = json.loads(found.group(1))
+    except ValueError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        "name": str(data.get("username") or "").strip(),
+        "account": str(data.get("userid") or "").strip(),
+    }
 
 
 def borrow_types(session: Session) -> list[dict[str, Any]]:

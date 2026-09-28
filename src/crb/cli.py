@@ -184,7 +184,14 @@ def _collect_profile(phone: str | None, name: str | None) -> None:
     except Exception:  # noqa: BLE001
         pass
 
-    name = name or prof.get("JYRXM") or ""
+    # 姓名：命令行给了 > 学校账号里那个 > 档案里旧的 > 问用户。
+    # 学校账号里本来就有（应用页的 `_JW_INIT_CONFIG.username`）—— 能读就不问。
+    identity = {}
+    try:
+        identity = api.account_identity(s)
+    except Exception:  # noqa: BLE001 - 读不到就问，不该因此中断登录
+        identity = {}
+    name = name or identity.get("name") or prof.get("JYRXM") or ""
     phone = phone or prof.get("JYRDH") or ""
     if sys.stdin.isatty():
         try:
@@ -256,12 +263,16 @@ def doctor(json_out: bool = typer.Option(False, "--json")) -> None:
     params = api.system_params(s)
     org = api.my_org(s)
     role, codes = api.borrow_contract(s)
+    identity = api.account_identity(s)
     info = {
         "ok": bool(term),
         "term": term,
         "JSJYSFKT": params.get("JSJYSFKT"),
         "JYSJFW": params.get("JYSJFW"),
         "org": org.get("DWDM") or org.get("SZDWDM"),
+        # 账号本人的姓名/用户号 —— 填申请时要用（学校表单也是拿它们自动填的）
+        "name": identity.get("name", ""),
+        "account": identity.get("account", ""),
         "role": role,
         "borrow_type_default": api.default_borrow_type(role),
         "borrow_types": codes,
@@ -270,6 +281,10 @@ def doctor(json_out: bool = typer.Option(False, "--json")) -> None:
         _dump(info)
         return
     console.print("[green]✓ 登录态可用[/green]")
+    if info.get("name"):
+        console.print(
+            f"  账号：{info['name']}" + (f"（{info['account']}）" if info.get("account") else "")
+        )
     console.print(f"  当前学期：{term or '[red]获取失败[/red]'}")
     console.print(f"  借用开关 JSJYSFKT：{params.get('JSJYSFKT', '?')}")
     console.print(f"  可借日期 JYSJFW：{params.get('JYSJFW', '?')}")
