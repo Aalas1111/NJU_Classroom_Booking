@@ -20,9 +20,9 @@ from . import profile as profile_mod
 from . import skill as skill_mod
 from .browser import BROWSER_CHOICES
 from .config import CAMPUSES, ROLE_LABELS
-from .models import BorrowRequest, PeriodSpan, RoomInfo
+from .models import BorrowRequest, FreeRoomSlot, PeriodSpan, RoomInfo
 from .session import NotLoggedInError, Session, WafBlockedError
-from .utils import parse_period, room_key_loose
+from .utils import is_iso_date, parse_period, room_key_loose
 
 # Windows 控制台默认 GBK，会导致中文乱码；强制 UTF-8 输出。
 for _stream in (sys.stdout, sys.stderr):
@@ -41,6 +41,9 @@ borrow_app = typer.Typer(no_args_is_help=True, help="教室借用申请：草稿
 app.add_typer(borrow_app, name="borrow")
 skill_app = typer.Typer(no_args_is_help=True, help="内置 AI Skill：查看 / 安装")
 app.add_typer(skill_app, name="skill")
+
+#: 一次最多查几个日期 —— 一天一发请求，但别让一句「查这学期」把学校扫一遍。
+MAX_QUERY_DATES = 31
 
 console = Console()
 err_console = Console(stderr=True)
@@ -312,46 +315,98 @@ def buildings(
 @app.command()
 def free(
     campus_id: str = typer.Option(..., "--campus", "-c", help="校区代码"),
-    day: str = typer.Option(..., "--date", "-d", help="日期 YYYY-MM-DD"),
+    day: str = typer.Option(
+        ..., "--date", "-d", help="日期 YYYY-MM-DD；要问好几天就逗号分隔（一天一发请求）"
+    ),
     period: str = typer.Option(..., "--period", "-p", help="节次区间，如 1-2"),
     building_id: str | None = typer.Option(None, "--building", "-b", help="教学楼代码（可选）"),
     room_type: str | None = typer.Option(None, "--room-type", "-t", help="教室类型代码（可选）"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """查询某天、某节次区间的空闲教室（服务端按节次过滤）。"""
-    s = _session()
+    """查询某天（或某几天）、某节次区间的空闲教室（服务端按节次过滤）。
+
+    区间语义是「**整个区间都空闲**」。给多个日期时**一天一发请求**、互不影响 ——
+    用来回答「这几天哪天有空的教室」，省得让调用方自己循环。
+    """
+    # 参数先验完再碰登录态：参数错就是参数错，别让人以为是自己没登录。
     start, end = _parse_period(period)
-    rooms = api.free_rooms(
-        s,
-        campus_id=campus_id,
-        day=day,
-        start_period=start,
-        end_period=end,
-        building_id=building_id,
-        room_type=room_type,
-    )
+    days = [d.strip() for d in day.split(",") if d.strip()]
+    if not days:
+        raise typer.BadParameter("--date 至少要给一个日期")
+    if len(days) > MAX_QUERY_DATES:
+        raise typer.BadParameter(f"--date 一次最多 {MAX_QUERY_DATES} 个日期（收到 {len(days)} 个）")
+    for d in days:
+        if not is_iso_date(d):
+            raise typer.BadParameter(f"--date 必须是 YYYY-MM-DD，收到 {d!r}")
+
+    s = _session()
+
+    results: list[tuple[str, list[FreeRoomSlot]]] = []
+    for d in days:
+        results.append(
+            (
+                d,
+                api.free_rooms(
+                    s,
+                    campus_id=campus_id,
+                    day=d,
+                    start_period=start,
+                    end_period=end,
+                    building_id=building_id,
+                    room_type=room_type,
+                ),
+            )
+        )
 
     if json_out:
-        _dump([r.model_dump(by_alias=True) for r in rooms])
+        if len(results) == 1:
+            _dump([r.model_dump(by_alias=True) for r in results[0][1]])
+        else:
+            _dump(
+                [
+                    {
+                        "date": d,
+                        "weekday": roomview.weekday_label(d),
+                        "count": len(rooms),
+                        "rooms": [r.model_dump(by_alias=True) for r in rooms],
+                    }
+                    for d, rooms in results
+                ]
+            )
         return
 
-    title = f"{CAMPUSES.get(campus_id, campus_id)} {day} 第{period}节 空闲教室"
-    table = Table(title=title)
-    table.add_column("教室", style="cyan")
-    table.add_column("教学楼")
-    table.add_column("类型")
-    table.add_column("容量", justify="right")
-    table.add_column("空闲时间")
-    for r in rooms:
-        table.add_row(
-            r.room_name,
-            r.building_name or "",
-            r.room_type_name or "",
-            str(r.seat_class or ""),
-            r.time_label or r.period_label or "",
-        )
+    where = CAMPUSES.get(campus_id, campus_id)
+    if len(results) == 1:
+        d, rooms = results[0]
+        table = Table(title=f"{where} {d} 第{period}节 空闲教室")
+        _free_table(table, [(d, rooms)])
+        console.print(table)
+        console.print(f"共 {len(rooms)} 间")
+        return
+    table = Table(title=f"{where} 第{period}节 空闲教室（{len(results)} 天）")
+    _free_table(table, results)
     console.print(table)
-    console.print(f"共 {len(rooms)} 间")
+    for d, rooms in results:
+        console.print(f"  {d} {roomview.weekday_label(d)}：{len(rooms)} 间")
+
+
+def _free_table(table: Table, results: list[tuple[str, list[FreeRoomSlot]]]) -> None:
+    multi = len(results) > 1
+    if multi:
+        table.add_column("日期", style="cyan")
+    for col in ("教室", "教学楼", "类型", "容量", "空闲时间"):
+        table.add_column(col, justify="right" if col == "容量" else None)
+    for d, rooms in results:
+        for r in rooms:
+            row = [d] if multi else []
+            row += [
+                r.room_name,
+                r.building_name or "",
+                r.room_type_name or "",
+                str(r.seat_class or ""),
+                r.time_label or r.period_label or "",
+            ]
+            table.add_row(*row)
 
 
 # ---------------------------------------------------------------- 教室（索引 / 单间）

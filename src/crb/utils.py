@@ -7,6 +7,13 @@ import unicodedata
 
 from .config import PERIOD_TIMES
 
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def is_iso_date(text: str) -> bool:
+    """``2026-09-30`` 这种形状 —— 送到学校之前先挡一道，别让它去猜。"""
+    return bool(_ISO_DATE.match(str(text or "").strip()))
+
 
 def parse_period(text: str) -> tuple[int, int]:
     """``"1"`` -> (1, 1)；``"1-2"`` -> (1, 2)。"""

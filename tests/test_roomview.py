@@ -220,3 +220,30 @@ def test_cli_room_help_mentions_options():
     result = CliRunner().invoke(app, ["rooms", "--help"])
     assert result.exit_code == 0
     assert "--match" in result.output
+
+
+# ---------------------------------------------------------------- 多日期（「这几天哪天有空」）
+def test_free_command_validates_dates_before_touching_the_session():
+    """参数错就是参数错 —— 别让人以为是登录态的问题（所以先验参再读登录态）。"""
+    from crb.cli import app as crb_app
+
+    result = CliRunner().invoke(crb_app, ["free", "-c", "3", "-d", "2026-09-30,明天", "-p", "1-2"])
+    assert result.exit_code == 2
+    assert "YYYY-MM-DD" in result.output
+
+
+def test_free_command_caps_the_number_of_dates():
+    from crb.cli import app as crb_app
+
+    many = ",".join(f"2026-{m:02d}-{d:02d}" for m in (9, 10) for d in range(1, 32))
+    result = CliRunner().invoke(crb_app, ["free", "-c", "3", "-d", many, "-p", "1-2"])
+    assert result.exit_code == 2
+    assert "最多" in result.output
+
+
+def test_is_iso_date():
+    from crb.utils import is_iso_date
+
+    assert is_iso_date("2026-09-30")
+    for bad in ("2026/09/30", "明天", "09-30", "", None):
+        assert not is_iso_date(bad)

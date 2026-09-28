@@ -184,7 +184,7 @@ crb doctor        --json                    # 自检
 crb profile       --phone 138xxxxxxxx --name 李赫 --org 400760   # 借用人档案
 crb campus        --json                    # 校区字典
 crb buildings     --json                    # 教学楼字典（不填 --campus 就四个校区一起列）
-crb free          --campus 3 --date 2026-09-10 --period 1-2 --json   # 空闲教室（区间 = 整段都空）
+crb free          --campus 3 --date 2026-09-10 --period 1-2 --json   # 空闲教室（区间 = 整段都空；日期可逗号分隔）
 crb rooms         --campus 3 --json         # 教室索引（--match 501 按关键词筛）
 crb room          --campus 3 --date 2026-09-30 --room 仙Ⅰ-501 --json  # 某教室这天的逐节空闲/占用
 crb day           --campus 4 --building S06 --date 2026-09-30 --json   # 整栋楼所有教室的空档（一次问全）

@@ -31,7 +31,7 @@ crb login                      # 打开浏览器扫码；顺便会问手机号�
 | `crb doctor --json` | 自检：登录态、当前学期、借用开关、单位、账号契约 |
 | `crb campus --json` | 校区：`1` 鼓楼 / `2` 浦口 / `3` 仙林 / `4` 苏州 |
 | `crb buildings --campus 4 --json` | 教学楼字典（返回 `JXLDM` + 名称）；**不填校区**就四个校区一起列 |
-| `crb free --campus 4 --date 2026-09-11 --period 7-8 --json` | 查空闲教室（可加 `-b <教学楼>`、`-t <教室类型>`） |
+| `crb free --campus 4 --date 2026-09-11 --period 7-8 --json` | 查空闲教室（可加 `-b <教学楼>`、`-t <教室类型>`；**日期可逗号分隔给多天**，一次回答「哪天有空」） |
 | `crb rooms --campus 3 --json` | 教室清单（索引）：教室名 / 教学楼 / 容量 / 类型；`--match 501` 按关键词筛 |
 | `crb room --campus 3 --date 2026-09-30 --room 仙Ⅰ-501 --json` | **某一间教室**这天各节的空闲/占用（可加 `-p 7-12` 只看某段） |
 | `crb day --campus 4 --building S06 --date 2026-09-30 --json` | **一栋楼这天所有教室**的空档（`-m 东1` 只看一楼东区）—— 一次问全 |
