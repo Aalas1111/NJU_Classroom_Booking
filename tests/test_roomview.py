@@ -154,6 +154,57 @@ def test_room_day_ambiguous_does_not_query_occupancy():
     assert len(sess.calls) == 1  # 只查了教室清单，没去猜着查占用
 
 
+# ---------------------------------------------------------------- 批量（一层楼一次问）
+def test_day_view_costs_one_plus_period_count():
+    """整栋楼的空档：1 发教室清单 + 12 发（每节一次），**与教室数无关**。
+
+    对照：逐间问 `crb room` 是 3 间 × 13 发。批量是这条命令存在的唯一理由。
+    """
+    sess = FakeSession(ROOMS, FREE)
+    view = roomview.day_view(sess, campus_id="3", day="2026-09-30")
+    assert len(sess.calls) == 1 + 12
+    assert view.total == 3
+    by_name = {row.room.name: row for row in view.rooms}
+    assert [s.label for s in by_name["仙Ⅰ-501"].free_spans] == ["1-2", "7-12"]
+    assert [s.label for s in by_name["仙Ⅰ-501"].occupied_spans] == ["3-6"]
+    # 整天空的教室：没有占用段
+    assert by_name["仙Ⅰ-502"].occupied_spans == []
+    assert by_name["逸B-501"].free_spans[0].time == "14:00-15:50"
+
+
+def test_day_view_includes_rooms_that_are_never_free():
+    """整天全占的教室也要在列 —— 只问「哪节空」会漏掉它，用户会以为没这间。"""
+    rooms = [
+        *ROOMS,
+        {
+            "JASMC": "仙Ⅰ-999",
+            "JXLDM": "11",
+            "JXLDM_DISPLAY": "仙I区",
+            "XXXQDM": "3",
+            "SKZWS": 30,
+        },
+    ]
+    free = {**FREE, "仙Ⅰ-999": set()}
+    view = roomview.day_view(FakeSession(rooms, free), campus_id="3", day="2026-09-30")
+    row = next(r for r in view.rooms if r.room.name == "仙Ⅰ-999")
+    assert row.free_spans == []
+    assert len(row.occupied_spans) == 1 and row.occupied_spans[0].label == "1-12"
+
+
+def test_day_view_match_filter_narrows_without_extra_requests():
+    sess = FakeSession(ROOMS, FREE)
+    view = roomview.day_view(sess, campus_id="3", day="2026-09-30", match="逸")
+    assert [row.room.name for row in view.rooms] == ["逸B-501"]
+    assert view.total == 1
+    assert len(sess.calls) == 1 + 12  # 筛选在本地做，不多打学校
+
+
+def test_cli_day_help():
+    result = CliRunner().invoke(app, ["day", "--help"])
+    assert result.exit_code == 0
+    assert "--building" in result.output and "--match" in result.output
+
+
 # ---------------------------------------------------------------- 小工具
 def test_period_time_helpers():
     assert slot_time(7) == "16:10-17:00"

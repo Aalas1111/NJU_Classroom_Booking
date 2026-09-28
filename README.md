@@ -187,6 +187,7 @@ crb buildings     --json                    # 教学楼字典（不填 --campus 
 crb free          --campus 3 --date 2026-09-10 --period 1-2 --json   # 空闲教室（区间 = 整段都空）
 crb rooms         --campus 3 --json         # 教室索引（--match 501 按关键词筛）
 crb room          --campus 3 --date 2026-09-30 --room 仙Ⅰ-501 --json  # 某教室这天的逐节空闲/占用
+crb day           --campus 4 --building S06 --date 2026-09-30 --json   # 整栋楼所有教室的空档（一次问全）
 crb plan          --file examples/plan.example.json                  # 批量规划（只出方案）
 crb plan          --file examples/plan.example.json --save           # 批量规划 + 存草稿
 crb plan          --file examples/plan.example.json --submit         # ⚠️ 批量正式提交

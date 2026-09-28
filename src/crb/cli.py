@@ -473,6 +473,59 @@ def _spans_text(spans: list[PeriodSpan]) -> str:
     return "、".join(f"{s.label} 节（{s.time}）" for s in spans)
 
 
+@app.command()
+def day(
+    campus_id: str = typer.Option(..., "--campus", "-c", help="校区代码"),
+    day_arg: str = typer.Option(..., "--date", "-d", help="日期 YYYY-MM-DD"),
+    building_id: str | None = typer.Option(
+        None, "--building", "-b", help="教学楼代码；**强烈建议给**（不给就整个校区）"
+    ),
+    match: str | None = typer.Option(None, "--match", "-m", help="按教室名筛，如「东1」「501」"),
+    room_type: str | None = typer.Option(None, "--room-type", "-t", help="教室类型代码（可选）"),
+    period: str = typer.Option("1-12", "--period", "-p", help="节次区间，如 7-12；默认全天"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """某天、**一栋楼**（或整个校区）所有教室的空档 —— 一次问全，别逐间问。
+
+    请求数只跟节次数有关（默认 12 发），跟教室数无关：42 间教室逐间问要 42×13 发，
+    这里 12 发就够。问「这栋楼这层有哪些空档」用它，不要一间一间调 `crb room`。
+    """
+    s = _session()
+    start, end = _parse_period(period)
+    view = roomview.day_view(
+        s,
+        campus_id=campus_id,
+        day=day_arg,
+        building_id=building_id,
+        room_type=room_type,
+        match=match,
+        start_period=start,
+        end_period=end,
+    )
+    if json_out:
+        _dump(view.model_dump())
+        return
+
+    where = CAMPUSES.get(campus_id, campus_id)
+    if view.building:
+        where += f" {view.building}"
+    title = f"{where} {view.date} {view.weekday} 各教室空档（{view.total} 间）"
+    table = Table(title=title)
+    for col in ("教室", "容量", "类型", "空闲", "占用"):
+        table.add_column(col)
+    for row in view.rooms[:60]:
+        table.add_row(
+            row.room.name,
+            str(row.room.capacity or ""),
+            row.room.room_type,
+            "、".join(s.label for s in row.free_spans) or "—",
+            "、".join(s.label for s in row.occupied_spans) or "—",
+        )
+    console.print(table)
+    if view.total > 60:
+        console.print("[dim]（只显示前 60 间；用 --building / --match 缩小范围）[/dim]")
+
+
 # ---------------------------------------------------------------- 批量规划
 @app.command()
 def plan(

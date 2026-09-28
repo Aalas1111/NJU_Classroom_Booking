@@ -23,7 +23,15 @@ from datetime import date as _date
 
 from . import api
 from .config import PERIOD_COUNT, PERIOD_TIMES
-from .models import FreeRoomSlot, PeriodSlot, PeriodSpan, RoomInfo, RoomView
+from .models import (
+    DayView,
+    FreeRoomSlot,
+    PeriodSlot,
+    PeriodSpan,
+    RoomInfo,
+    RoomSlots,
+    RoomView,
+)
 from .session import Session
 from .utils import room_key, room_key_loose, slot_time, span_label, span_time
 
@@ -130,6 +138,38 @@ def _candidates(hits: list[FreeRoomSlot]) -> list[FreeRoomSlot]:
     return hits[:CANDIDATE_LIMIT]
 
 
+def free_map(
+    session: Session,
+    *,
+    campus_id: str,
+    day: str,
+    building_id: str | None = None,
+    start_period: int = 1,
+    end_period: int = PERIOD_COUNT,
+) -> dict[str, set[int]]:
+    """「这一天每个节次，都有哪些教室空着」—— 逐节问一遍，拼成 ``{教室名: {空闲节次}}``。
+
+    **这是批量查询的原语**：请求数只跟节次数有关（默认 12 发），跟教室数无关。
+    实测对照（2026-09-28，苏州南雍楼 42 间）：逐间问要 42×13 发、好几分钟；
+    这里 12 发就拿到整栋楼。
+    """
+    out: dict[str, set[int]] = {}
+    for period in range(start_period, end_period + 1):
+        if period not in PERIOD_TIMES:
+            continue
+        rows = api.free_rooms(
+            session,
+            campus_id=campus_id,
+            day=day,
+            start_period=period,
+            end_period=period,
+            building_id=building_id,
+        )
+        for row in rows:
+            out.setdefault(row.room_name, set()).add(period)
+    return out
+
+
 def _spans(periods: list[int]) -> list[PeriodSpan]:
     """把一串节次压成连续段：``[1, 2, 5, 6, 7]`` -> ``1-2``、``5-7``。"""
     out: list[PeriodSpan] = []
@@ -150,6 +190,59 @@ def _spans(periods: list[int]) -> list[PeriodSpan]:
 
 def _span(a1: int, a2: int) -> PeriodSpan:
     return PeriodSpan(label=span_label(a1, a2), start=a1, end=a2, time=span_time(a1, a2))
+
+
+def day_view(
+    session: Session,
+    *,
+    campus_id: str,
+    day: str,
+    building_id: str | None = None,
+    room_type: str | None = None,
+    match: str | None = None,
+    start_period: int = 1,
+    end_period: int = PERIOD_COUNT,
+) -> DayView:
+    """某天、某栋楼（或整个校区）所有教室的空闲情况 —— **一次问完，别逐间问**。
+
+    请求数 = 1（教室清单，保证「整天全占」的教室也在列）+ 节次数（默认 12）。
+    """
+    periods = [p for p in range(start_period, end_period + 1) if p in PERIOD_TIMES]
+    all_rooms = api.all_rooms(
+        session, campus_id=campus_id, building_id=building_id, room_type=room_type, day=day
+    )
+    if match:
+        wanted = room_key_loose(match)
+        all_rooms = [r for r in all_rooms if wanted in room_key_loose(r.room_name)]
+    free = free_map(
+        session,
+        campus_id=campus_id,
+        day=day,
+        building_id=building_id,
+        start_period=start_period,
+        end_period=end_period,
+    )
+
+    view = DayView(
+        campus=campus_id,
+        campus_name=all_rooms[0].campus_name if all_rooms else "",
+        building=all_rooms[0].building_name if all_rooms else "",
+        building_code=building_id or "",
+        date=day,
+        weekday=weekday_label(day),
+        checked_periods=periods,
+        total=len(all_rooms),
+    )
+    for room in sorted(all_rooms, key=lambda r: room_key(r.room_name)):
+        free_periods = sorted(free.get(room.room_name, set()))
+        view.rooms.append(
+            RoomSlots(
+                room=RoomInfo.of(room),
+                free_spans=_spans(free_periods),
+                occupied_spans=_spans([p for p in periods if p not in free_periods]),
+            )
+        )
+    return view
 
 
 def room_day(

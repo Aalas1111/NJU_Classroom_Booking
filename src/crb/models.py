@@ -103,6 +103,32 @@ class RoomView(BaseModel):
     candidates: list[RoomInfo] = []
 
 
+class RoomSlots(BaseModel):
+    """一间教室某天的空闲/占用段（批量视图里的一行，不带逐节明细）。"""
+
+    room: RoomInfo
+    free_spans: list[PeriodSpan] = []
+    occupied_spans: list[PeriodSpan] = []
+
+
+class DayView(BaseModel):
+    """某天、某栋楼（或整个校区）**所有教室**的空闲情况。
+
+    这是「一次问一层楼」的那条路：请求数只与节次数有关（默认 12 发），
+    与教室数无关 —— 逐间问的话，42 间教室要 42×13 发。
+    """
+
+    campus: str = ""
+    campus_name: str = ""
+    building: str = ""
+    building_code: str = ""
+    date: str = ""
+    weekday: str = ""
+    checked_periods: list[int] = []
+    total: int = 0
+    rooms: list[RoomSlots] = []
+
+
 class BorrowRequest(BaseModel):
     """一条教室借用申请（对应 xzjasjysq.do 的 data 对象）。"""
 
