@@ -10,6 +10,9 @@ build/
 .coverage
 htmlcov/
 
+# ---- 本机打包实验（只留在本机，不入库）----
+packaging/crb_main.py
+
 # ---- 本地敏感凭证（绝不入库）----
 .crb/
 auth.json
