@@ -71,9 +71,29 @@ def campuses(session: Session) -> list[Campus]:
     return [Campus(id=k, name=v) for k, v in CAMPUSES.items()]
 
 
-def buildings(session: Session, campus_id: str) -> list[Building]:
+def buildings(session: Session, campus_id: str | None = None) -> list[Building]:
+    """教学楼字典。
+
+    ``campus_id`` 为空时把四个校区都查一遍（接口本身按校区过滤，必须逐个来），
+    返回的每行都带上 ``XXXQDM`` —— 省得调用方再猜这栋楼在哪个校区。
+    """
+    if campus_id:
+        return _buildings_of(session, campus_id)
+    out: list[Building] = []
+    for cid in CAMPUSES:
+        out.extend(_buildings_of(session, cid))
+    return out
+
+
+def _buildings_of(session: Session, campus_id: str) -> list[Building]:
     rows = _rows(session.post_form(EP_BUILDING, {"XXXQDM": campus_id}), "jxlcx")
-    return [Building.model_validate(r) for r in rows]
+    out: list[Building] = []
+    for r in rows:
+        item = Building.model_validate(r)
+        if not item.campus_id:
+            item.campus_id = campus_id
+        out.append(item)
+    return out
 
 
 def room_types(session: Session) -> list[dict[str, Any]]:
@@ -185,6 +205,37 @@ def calendar(session: Session, term: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------- 空闲教室
+def _free_query(
+    session: Session,
+    *,
+    day: str,
+    campus_id: str,
+    start_period: int | None = None,
+    end_period: int | None = None,
+    building_id: str | None = None,
+    room_type: str | None = None,
+    page_size: int = 999,
+) -> list[FreeRoomSlot]:
+    data: dict[str, Any] = {
+        "KXRQ": day,
+        "XXXQDM": campus_id,
+        "pageSize": page_size,
+        "pageNumber": 1,
+        "querySetting": "[]",
+    }
+    # 不给 KSJC/JSJC 时学校会忽略节次过滤，返回该校区**全部**教室（实测 2026-09-28）。
+    if start_period is not None and end_period is not None:
+        data["KSJC"] = str(start_period)
+        data["JSJC"] = str(end_period)
+    if building_id:
+        data["JXLDM"] = building_id
+    if room_type:
+        data["JASLXDM"] = room_type
+
+    resp = session.post_form(EP_FREE_ROOMS, data)
+    return [FreeRoomSlot.model_validate(r) for r in _rows(resp, "cxkxjs")]
+
+
 def free_rooms(
     session: Session,
     *,
@@ -198,25 +249,44 @@ def free_rooms(
 ) -> list[FreeRoomSlot]:
     """查询某天、某节次区间、某校区的空闲教室。
 
-    对应前端「按日期」页：`pagePath=/modules/kxjscx.do, action=cxkxjs`，
-    节次过滤由服务端完成（KXRQ/KSJC/JSJC），无需本地启发式。
+    对应前端「按日期」页：`pagePath=/modules/kxjscx.do, action=cxkxjs`。
+    **区间语义是「整个区间都空闲」**（实测：`1-2` 的结果 = `1` 与 `2` 的交集），
+    不是「区间内任意一节空闲」——所以逐节状态要用单节查询来问。
     """
-    data: dict[str, Any] = {
-        "KXRQ": day,
-        "KSJC": str(start_period),
-        "JSJC": str(end_period),
-        "XXXQDM": campus_id,
-        "pageSize": page_size,
-        "pageNumber": 1,
-        "querySetting": "[]",
-    }
-    if building_id:
-        data["JXLDM"] = building_id
-    if room_type:
-        data["JASLXDM"] = room_type
+    return _free_query(
+        session,
+        day=day,
+        campus_id=campus_id,
+        start_period=start_period,
+        end_period=end_period,
+        building_id=building_id,
+        room_type=room_type,
+        page_size=page_size,
+    )
 
-    resp = session.post_form(EP_FREE_ROOMS, data)
-    return [FreeRoomSlot.model_validate(r) for r in _rows(resp, "cxkxjs")]
+
+def all_rooms(
+    session: Session,
+    *,
+    campus_id: str,
+    building_id: str | None = None,
+    room_type: str | None = None,
+    day: str | None = None,
+    page_size: int = 999,
+) -> list[FreeRoomSlot]:
+    """某校区的教室清单（教室索引/字典）。
+
+    走的是同一个接口，只是**不带节次**：学校返回该校区全部教室
+    （仙林 223 间 / 鼓楼 169 间，实测 2026-09-28），节次字段为空。
+    """
+    return _free_query(
+        session,
+        day=day or today(),
+        campus_id=campus_id,
+        building_id=building_id,
+        room_type=room_type,
+        page_size=page_size,
+    )
 
 
 # ---------------------------------------------------------------- 申请

@@ -44,6 +44,65 @@ class FreeRoomSlot(BaseModel):
     model_config = {"populate_by_name": True, "extra": "ignore"}
 
 
+class RoomInfo(BaseModel):
+    """一间教室的静态信息 —— 教室索引里的一行，也是工具给 AI 看的那种写法。"""
+
+    name: str
+    building: str = ""
+    building_code: str = ""
+    campus: str = ""
+    campus_name: str = ""
+    capacity: int | None = None
+    room_type: str = ""
+
+    @classmethod
+    def of(cls, slot: FreeRoomSlot) -> RoomInfo:
+        return cls(
+            name=slot.room_name,
+            building=slot.building_name or "",
+            building_code=slot.building_id or "",
+            campus=slot.campus_id or "",
+            campus_name=slot.campus_name or "",
+            capacity=slot.seat_class or slot.seat_exam,
+            room_type=slot.room_type_name or "",
+        )
+
+
+class PeriodSlot(BaseModel):
+    """某间教室在某一节的状态。"""
+
+    period: int
+    time: str  # 08:00-08:50
+    free: bool
+
+
+class PeriodSpan(BaseModel):
+    """连续若干节的同状态段（空闲段 / 占用段）。"""
+
+    label: str  # 1-2 / 7
+    start: int
+    end: int
+    time: str  # 08:00-09:50
+
+
+class RoomView(BaseModel):
+    """某间教室在某一天的逐节空闲情况（学校权威口径）。
+
+    ``status``：``ok`` 查到确定的一间；``ambiguous`` 名字对上了多间（或只对上一部分），
+    把 ``candidates`` 交给 LLM 去问用户；``not_found`` 一间都没对上。
+    """
+
+    status: str = "ok"
+    campus: str = ""
+    date: str = ""
+    weekday: str = ""  # 周三
+    room: RoomInfo | None = None
+    periods: list[PeriodSlot] = []
+    free_spans: list[PeriodSpan] = []
+    occupied_spans: list[PeriodSpan] = []
+    candidates: list[RoomInfo] = []
+
+
 class BorrowRequest(BaseModel):
     """一条教室借用申请（对应 xzjasjysq.do 的 data 对象）。"""
 

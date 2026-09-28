@@ -13,6 +13,18 @@
 - `crb plan --save/--submit` 与 `borrow draft` 会用当前账号字典校验 `JSJYLXDM`，
   跨端代码直接报错并列出可用值；`plan --json` 输出带 `contract` 信息。
 - `crb doctor` 显示账号契约与可用借用类型；登录采集档案时一并记录 `borrow_role` / `JSJYLXDM`。
+- **教室视角查询**（把「时段 → 空闲教室」翻过来，回答「某间教室某天各节空不空」）：
+  - `crb rooms`：教室索引（教室名 / 教学楼 / 容量 / 类型），`--match` 按关键词筛；
+  - `crb room`：某一间教室在某天的逐节空闲/占用 + 空闲时间段汇总（`-p` 可只看某段）；
+    名字对不上或对上多间时**不猜**——返回 `status=ambiguous`/`not_found` 与候选，
+    交给调用方去确认。
+  - 实现口径：学校只有「按时段查空闲教室」是权威的（`cxkxjs.do`），且**区间语义是
+    「整个区间都空闲」**（实测 `1-2` = `1` ∩ `2`），所以逐节状态靠单节查询问出来；
+    整天全空的最多问 1 发，其余最多 1 + 节次个数发。占用网格 `cxjsqk.do` 与单教室
+    详情 `cxkxjsxq.do` 都不完整（列语义混乱 / 只回一部分占用），未采用。
+- `crb buildings` 的 `--campus` 变为可选：不填就四个校区一起列（每行带 `XXXQDM`）。
+- `crb free --json` 之外的新命令统一输出**友好字段名**（`name`/`building`/`capacity`…），
+  不再直接把学校字段（`JASMC`/`SKZWS`）丢给调用方。
 
 ### Changed
 

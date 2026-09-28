@@ -49,6 +49,7 @@
 | 🔑 登录态复用 | `crb login` 打开有头浏览器完成一次统一身份认证，之后所有命令免登录 |
 | 🩺 自检 | `crb doctor` 检查登录态、当前学期、借用开关、所在单位 |
 | 🏫 空闲教室 | `crb free` 走权威接口 `kxjscx/cxkxjs.do`，节次过滤由服务端完成 |
+| 🔍 教室视角 | `crb rooms` 教室索引（名称/容量/类型）+ `crb room` 某间教室某天的逐节空闲/占用；名字对不上时给候选，**不猜** |
 | 🧠 批量规划 | `crb plan` 查空闲 → 容量过滤 → 批次内 + 跨批次冲突检测 → 自动分配教室 |
 | 📝 申请管理 | 列表 / 存草稿 / 正式提交 / 撤回 / 编辑 / 删除 |
 | 🤖 AI 友好 | 所有命令支持 `--json`；内置 `SKILL.md` 随包分发，`crb skill install` 一键装到 harness |
@@ -144,6 +145,10 @@ crb doctor --json
 # 3. 查空闲教室（校区 3 = 仙林，第 1-2 节）
 crb free --campus 3 --date 2026-09-10 --period 1-2 --json
 
+# 3b. 反过来问某一间教室：先列教室索引，再看它这天各节的空闲/占用
+crb rooms --campus 3 --match 501 --json
+crb room  --campus 3 --date 2026-09-30 --room 仙Ⅰ-501 --json
+
 # 4. 批量规划：先出方案（不写系统）
 crb plan --file examples/plan.example.json
 
@@ -178,8 +183,10 @@ crb login                                   # 首次登录（可选 --browser / 
 crb doctor        --json                    # 自检
 crb profile       --phone 138xxxxxxxx --name 李赫 --org 400760   # 借用人档案
 crb campus        --json                    # 校区字典
-crb buildings     --campus 3 --json         # 仙林教学楼
-crb free          --campus 3 --date 2026-09-10 --period 1-2 --json   # 空闲教室
+crb buildings     --json                    # 教学楼字典（不填 --campus 就四个校区一起列）
+crb free          --campus 3 --date 2026-09-10 --period 1-2 --json   # 空闲教室（区间 = 整段都空）
+crb rooms         --campus 3 --json         # 教室索引（--match 501 按关键词筛）
+crb room          --campus 3 --date 2026-09-30 --room 仙Ⅰ-501 --json  # 某教室这天的逐节空闲/占用
 crb plan          --file examples/plan.example.json                  # 批量规划（只出方案）
 crb plan          --file examples/plan.example.json --save           # 批量规划 + 存草稿
 crb plan          --file examples/plan.example.json --submit         # ⚠️ 批量正式提交

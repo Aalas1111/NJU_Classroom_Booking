@@ -15,14 +15,14 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import __version__, api, auth, planner
+from . import __version__, api, auth, planner, roomview
 from . import profile as profile_mod
 from . import skill as skill_mod
 from .browser import BROWSER_CHOICES
 from .config import CAMPUSES, ROLE_LABELS
-from .models import BorrowRequest
+from .models import BorrowRequest, PeriodSpan, RoomInfo
 from .session import NotLoggedInError, Session, WafBlockedError
-from .utils import parse_period
+from .utils import parse_period, room_key_loose
 
 # Windows 控制台默认 GBK，会导致中文乱码；强制 UTF-8 输出。
 for _stream in (sys.stdout, sys.stderr):
@@ -293,16 +293,19 @@ def campus(json_out: bool = typer.Option(False, "--json", help="输出 JSON")) -
 
 @app.command()
 def buildings(
-    campus_id: str = typer.Option(..., "--campus", "-c", help="校区代码，见 `crb campus`"),
+    campus_id: str | None = typer.Option(
+        None, "--campus", "-c", help="校区代码（不填=四个校区一起列，见 `crb campus`）"
+    ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """列出某校区的教学楼。"""
+    """列出教学楼（字典）：不填校区就四个校区一起列。"""
     rows = api.buildings(_session(), campus_id)
     if json_out:
         _dump([r.model_dump(by_alias=True) for r in rows])
         return
     for r in rows:
-        console.print(f"  {r.id}  {r.name}")
+        campus = CAMPUSES.get(str(r.campus_id), str(r.campus_id or ""))
+        console.print(f"  {r.id}  {r.name}  [dim]({campus})[/dim]")
 
 
 # ---------------------------------------------------------------- 空闲教室
@@ -349,6 +352,125 @@ def free(
         )
     console.print(table)
     console.print(f"共 {len(rooms)} 间")
+
+
+# ---------------------------------------------------------------- 教室（索引 / 单间）
+@app.command()
+def rooms(
+    campus_id: str = typer.Option(..., "--campus", "-c", help="校区代码"),
+    building_id: str | None = typer.Option(None, "--building", "-b", help="教学楼代码（可选）"),
+    room_type: str | None = typer.Option(None, "--room-type", "-t", help="教室类型代码（可选）"),
+    match: str | None = typer.Option(
+        None, "--match", "-m", help="按名字筛：给「501」「仙一」这种关键词即可"
+    ),
+    day: str | None = typer.Option(None, "--date", "-d", help="按哪天取清单，默认今天"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """列出某校区的教室清单（索引）：教室名 / 教学楼 / 容量 / 类型。
+
+    这是「先索引、再筛选」里的索引：用户嘴里的「501」「新教」先在这里对到真实教室名，
+    再用 `crb room` 查它某天的空闲情况。
+    """
+    s = _session()
+    rows = api.all_rooms(
+        s, campus_id=campus_id, building_id=building_id, room_type=room_type, day=day
+    )
+    infos = [RoomInfo.of(r) for r in rows]
+    if match:
+        wanted = room_key_loose(match)
+        infos = [
+            i for i in infos if wanted in room_key_loose(i.name) or room_key_loose(i.name) in wanted
+        ]
+    if json_out:
+        _dump(
+            {
+                "campus": campus_id,
+                "campus_name": CAMPUSES.get(campus_id, campus_id),
+                "total": len(infos),
+                "rooms": [i.model_dump() for i in infos],
+            }
+        )
+        return
+
+    title = f"{CAMPUSES.get(campus_id, campus_id)} 教室清单（{len(infos)} 间）"
+    if match:
+        title += f"｜匹配「{match}」"
+    table = Table(title=title)
+    for col in ("教室", "教学楼", "类型", "容量"):
+        table.add_column(col)
+    for i in infos[:60]:
+        table.add_row(i.name, i.building, i.room_type, str(i.capacity or ""))
+    console.print(table)
+    if len(infos) > 60:
+        console.print("[dim]（只显示前 60 间；用 --match 缩小范围）[/dim]")
+    elif not match:
+        counter: dict[str, int] = {}
+        for i in infos:
+            counter[i.building or "（未知）"] = counter.get(i.building or "（未知）", 0) + 1
+        summary = " / ".join(f"{k} {v}" for k, v in counter.items())
+        console.print(f"[dim]按教学楼：{summary}[/dim]")
+
+
+@app.command()
+def room(
+    room_name: str = typer.Option(
+        ..., "--room", "-r", help="教室名；给关键词也行（501 / 仙一501）"
+    ),
+    campus_id: str = typer.Option(..., "--campus", "-c", help="校区代码"),
+    day: str = typer.Option(..., "--date", "-d", help="日期 YYYY-MM-DD"),
+    building_id: str | None = typer.Option(
+        None, "--building", "-b", help="教学楼代码（可选；给了只会在这栋楼里找）"
+    ),
+    period: str = typer.Option("1-12", "--period", "-p", help="节次区间，如 7-12；默认全天"),
+    json_out: bool = typer.Option(False, "--json"),
+) -> None:
+    """查**某一间教室**在某天各节的空闲情况（学校权威口径）。
+
+    认不出或多间候选时**不猜**：把候选列出来（`status=ambiguous`），交给用户确认。
+    """
+    s = _session()
+    start, end = _parse_period(period)
+    view = roomview.room_day(
+        s,
+        campus_id=campus_id,
+        day=day,
+        room=room_name,
+        building_id=building_id,
+        start_period=start,
+        end_period=end,
+    )
+    if json_out:
+        _dump(view.model_dump())
+        return
+
+    if view.status != "ok" or view.room is None:
+        reason = "没找到这间教室" if view.status == "not_found" else "这个名字对上了不止一间"
+        err_console.print(f"[yellow]{reason}：{room_name}[/yellow]")
+        for c in view.candidates:
+            console.print(f"  {c.name}  [dim]{c.building}（{c.campus_name}）[/dim]")
+        if not view.candidates:
+            console.print("[dim]用 `crb rooms -c <校区> --match <关键词>` 看看有哪些教室。[/dim]")
+        return
+
+    info = view.room
+    console.print(
+        f"[bold]{info.name}[/bold]  [dim]{info.building}（{info.campus_name}）"
+        f" 容量 {info.capacity or '?'} {info.room_type}[/dim]"
+    )
+    console.print(f"{view.date} {view.weekday}")
+    table = Table()
+    for col in ("节次", "时间", "状态"):
+        table.add_column(col)
+    for slot in view.periods:
+        mark = "[green]空闲[/green]" if slot.free else "[red]占用[/red]"
+        table.add_row(str(slot.period), slot.time, mark)
+    console.print(table)
+    console.print(f"空闲：{_spans_text(view.free_spans) or '（无）'}")
+    console.print(f"占用：{_spans_text(view.occupied_spans) or '（无）'}")
+
+
+def _spans_text(spans: list[PeriodSpan]) -> str:
+    return "、".join(f"{s.label} 节（{s.time}）" for s in spans)
 
 
 # ---------------------------------------------------------------- 批量规划
