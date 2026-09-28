@@ -215,9 +215,7 @@ def build_plan(
             )
             continue
 
-        avail = [
-            r for r in big if not _room_occupied(r, campus, act.date, a1, a2, used)
-        ]
+        avail = [r for r in big if not _room_occupied(r, campus, act.date, a1, a2, used)]
         if not avail:
             # 候选全被占：若其中某间正是已有申请（同日期/校区/节次/教室），报「重复」更有用
             hits = [
@@ -332,9 +330,7 @@ def save_plan(
         if a.status != "ok":
             out.append({"title": a.activity.title, "ok": False, "msg": a.note or a.status})
             continue
-        problem = api.check_borrow_type(
-            a.activity.JSJYLXDM or applicant.JSJYLXDM, role, codes
-        )
+        problem = api.check_borrow_type(a.activity.JSJYLXDM or applicant.JSJYLXDM, role, codes)
         if problem:
             out.append({"title": a.activity.title, "ok": False, "msg": problem})
             continue

@@ -177,9 +177,7 @@ def test_build_plan_preferred_room_duplicate(monkeypatch) -> None:
 
     monkeypatch.setattr(planner.api, "free_rooms", _boom)
     acts = [
-        Activity(
-            title="x", date="2026-09-10", period="1-2", people=10, preferred_room="仙I-101"
-        )
+        Activity(title="x", date="2026-09-10", period="1-2", people=10, preferred_room="仙I-101")
     ]
     res = planner.build_plan(
         None,  # type: ignore[arg-type]
@@ -222,9 +220,7 @@ def test_save_plan_follows_account_contract(monkeypatch) -> None:
     monkeypatch.setattr(planner.api, "save_borrow", _fake_save)
 
     def _assignment(title: str, code: str | None = None) -> Assignment:
-        act = Activity(
-            title=title, date="2026-09-10", period="1-2", people=10, JSJYLXDM=code
-        )
+        act = Activity(title=title, date="2026-09-10", period="1-2", people=10, JSJYLXDM=code)
         return Assignment(activity=act, room=_slot("仙Ⅰ-203", 96), status="ok")
 
     res = planner.save_plan(
