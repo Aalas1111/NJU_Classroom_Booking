@@ -3,6 +3,32 @@
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)，
 变更记录遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 格式。
 
+## Unreleased
+
+### Added
+
+- **教师端契约自动识别**：`JSJYLXDM` 是同名字段两套字典（学生端=指导教师所在单位，
+  教师端=活动类型）。`crb` 现在按登录账号的 `cxjsjylx.do` 字典判定 `role`
+  （`student` / `teacher`），缺省借用类型随之取值（学生端 `02` / 教师端 `09` 团学活动）。
+- `crb plan --save/--submit` 与 `borrow draft` 会用当前账号字典校验 `JSJYLXDM`，
+  跨端代码直接报错并列出可用值；`plan --json` 输出带 `contract` 信息。
+- `crb doctor` 显示账号契约与可用借用类型；登录采集档案时一并记录 `borrow_role` / `JSJYLXDM`。
+
+### Changed
+
+- `crb plan` 的防重口径改为「日期 + 校区 + 节次 + 教室」四项（对齐教师侧脚本）：
+  四项一致（节次区间有重叠也算）才判 `duplicate`；**时段重叠但教室不同不再判重复**
+  （并行活动是正常需求，此前的实现会误拦）。已有申请的教室证据优先取 `FJ`，
+  没有则取学校分配后的 `JASMC`；教室名比对做了归一化（`仙I-102` / `仙Ⅰ-102` 视为同一间）。
+  `--allow-overlap` 语义不变（强制放行重复）。
+
+### Fixed
+
+- 登录后采集档案时，交互环境 stdin 提前 EOF（如 AI harness / CI）不再中断整个 `crb login`，
+  已采集到的单位与契约照常入库。
+- `plan --json` 回执里的 `request.TYPE` 过去固定显示 `save`（快照早于 TYPE 改写），
+  现与实际发送值（`save` / `TJ`）一致。
+
 ## 0.0.0 - 2026-02-21
 
 首个公开版本。学生端 CLI + 内置 AI Skill 打通：登录态复用 → 查空闲教室 →

@@ -14,6 +14,7 @@ from typing import Any
 
 from .config import (
     CAMPUSES,
+    DEFAULT_BORROW_TYPE,
     EP_BORROW_TYPE,
     EP_BUILDING,
     EP_CALENDAR,
@@ -28,6 +29,12 @@ from .config import (
     EP_SYS_PARAMS,
     EP_TERM,
     EP_WITHDRAW,
+    ROLE_LABELS,
+    ROLE_STUDENT,
+    ROLE_TEACHER,
+    ROLE_UNKNOWN,
+    STUDENT_BORROW_TYPES,
+    TEACHER_BORROW_TYPES,
 )
 from .models import BorrowRecord, BorrowRequest, Building, Campus, FreeRoomSlot, SaveResult
 from .session import Session
@@ -109,6 +116,49 @@ def my_org(session: Session) -> dict[str, Any]:
 
 def borrow_types(session: Session) -> list[dict[str, Any]]:
     return _rows(session.post_form(EP_BORROW_TYPE), "cxjsjylx")
+
+
+def borrow_contract(session: Session) -> tuple[str, dict[str, str]]:
+    """判定当前账号走哪套借用类型契约，返回 ``(角色, {代码: 名称})``。
+
+    ``JSJYLXDM`` 是同名字段两套字典：学生端是「指导教师所在单位」口径，
+    教师端是活动类型口径。服务端按登录账号返回对应字典，以此判定。
+    """
+    codes = {
+        str(r["JSJYLXDM"]): str(r.get("JSJYLXMC") or "")
+        for r in borrow_types(session)
+        if r.get("JSJYLXDM")
+    }
+    if not codes:
+        return ROLE_UNKNOWN, {}
+    student_hit = len(codes.keys() & STUDENT_BORROW_TYPES.keys())
+    teacher_hit = len(codes.keys() & TEACHER_BORROW_TYPES.keys())
+    if teacher_hit > student_hit:
+        return ROLE_TEACHER, codes
+    if student_hit:
+        return ROLE_STUDENT, codes
+    return ROLE_UNKNOWN, codes
+
+
+def default_borrow_type(role: str) -> str:
+    """契约对应的默认借用类型：学生端 02（学生社团管理部）、教师端 09（团学活动）。"""
+    return DEFAULT_BORROW_TYPE.get(role, "")
+
+
+def check_borrow_type(code: str, role: str, codes: dict[str, str]) -> str:
+    """校验借用类型是否属于当前账号的字典；通过返回空串，否则返回错误文案。"""
+    if not codes or code in codes:
+        return ""
+    available = "、".join(f"{k} {v}" for k, v in sorted(codes.items()))
+    return (
+        f"借用类型 {code or '（空）'} 不在当前账号字典（{ROLE_LABELS.get(role, role)}）内；"
+        f"可用：{available}"
+    )
+
+
+def borrow_type_hint(codes: dict[str, str]) -> str:
+    """字典的可读形式，如 ``09 团学活动 / 07 教师教学、补课``。"""
+    return " / ".join(f"{k} {v}" for k, v in sorted(codes.items()))
 
 
 # ---------------------------------------------------------------- 日期 / 校历

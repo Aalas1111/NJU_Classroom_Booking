@@ -102,6 +102,18 @@ class BorrowRecord(BaseModel):
         return getattr(self, key, default)
 
 
+class ExistingBooking(BaseModel):
+    """一条已有申请，参与「日期 + 校区 + 节次 + 教室」四项防重。"""
+
+    date: str
+    campus: str = ""
+    start_period: int
+    end_period: int
+    room: str = ""  # FJ / JASMC 里的教室名（用于占位与提示）
+    room_key: str = ""  # 归一化后的教室证据：教室名 + 用途描述
+    label: str = ""
+
+
 class Activity(BaseModel):
     """一条待申请的活动（自然语言/表格整理后的结构化输入）。"""
 
@@ -126,7 +138,8 @@ class Applicant(BaseModel):
     JYDWDM: str = ""
     JYRXM: str = ""
     JYRDH: str = ""
-    JSJYLXDM: str = "02"
+    # 留空则依次用档案、账号契约默认值补齐（学生端 02 / 教师端 09）
+    JSJYLXDM: str = ""
     campus: str = ""  # 留空则由档案补齐，再回退 "3"
     building: str | None = None
     room_type: str | None = None

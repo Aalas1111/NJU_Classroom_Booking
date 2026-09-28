@@ -131,3 +131,52 @@ def test_login_rejects_bad_browser_option() -> None:
     assert result.exit_code == 2
     for name in BROWSER_CHOICES:
         assert name in result.output
+
+
+class _DictSession:
+    """只回借用类型字典的假会话（cxjsjylx.do）。"""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = rows
+
+    def post_form(self, path, data=None):
+        assert path == api.EP_BORROW_TYPE
+        return {"datas": {"cxjsjylx": {"rows": self._rows}}}
+
+
+def test_borrow_contract_detects_student() -> None:
+    sess = _DictSession(
+        [
+            {"JSJYLXDM": "01", "JSJYLXMC": "辅导员"},
+            {"JSJYLXDM": "02", "JSJYLXMC": "学生社团管理部"},
+        ]
+    )
+    role, codes = api.borrow_contract(sess)  # type: ignore[arg-type]
+    assert role == "student"
+    assert api.default_borrow_type(role) == "02"
+    assert api.check_borrow_type("02", role, codes) == ""
+
+
+def test_borrow_contract_detects_teacher_and_rejects_student_code() -> None:
+    """同名字段两套字典：教师端不认学生端代码 02。"""
+    sess = _DictSession(
+        [
+            {"JSJYLXDM": "07", "JSJYLXMC": "教师教学、补课"},
+            {"JSJYLXDM": "09", "JSJYLXMC": "团学活动"},
+            {"JSJYLXDM": "40", "JSJYLXMC": "讲座"},
+        ]
+    )
+    role, codes = api.borrow_contract(sess)  # type: ignore[arg-type]
+    assert role == "teacher"
+    assert api.default_borrow_type(role) == "09"
+    problem = api.check_borrow_type("02", role, codes)
+    assert "02" in problem and "教师端" in problem and "09 团学活动" in problem
+    assert api.check_borrow_type("09", role, codes) == ""
+
+
+def test_borrow_contract_unknown_dict_skips_check() -> None:
+    sess = _DictSession([{"JSJYLXDM": "88", "JSJYLXMC": "??? "}])
+    role, codes = api.borrow_contract(sess)  # type: ignore[arg-type]
+    assert role == "unknown"
+    assert api.default_borrow_type(role) == ""
+    assert api.check_borrow_type("02", role, codes) != ""  # 字典可用就仍校验

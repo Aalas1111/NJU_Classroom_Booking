@@ -19,7 +19,7 @@ from . import __version__, api, auth, planner
 from . import profile as profile_mod
 from . import skill as skill_mod
 from .browser import BROWSER_CHOICES
-from .config import CAMPUSES
+from .config import CAMPUSES, ROLE_LABELS
 from .models import BorrowRequest
 from .session import NotLoggedInError, Session, WafBlockedError
 from .utils import parse_period
@@ -151,30 +151,50 @@ def login(
     _collect_profile(phone, name)
 
 
+def _contract_line(role: str, codes: dict[str, str]) -> str:
+    """账号契约的一句话描述，如 ``教师端（借用类型默认 09 团学活动）``。"""
+    label = ROLE_LABELS.get(role, role)
+    default = api.default_borrow_type(role)
+    if not default:
+        return label
+    name = codes.get(default, "")
+    suffix = f" {name}" if name else ""
+    return f"{label}（借用类型默认 {default}{suffix}）"
+
+
 def _collect_profile(phone: str | None, name: str | None) -> None:
-    """登录后采集姓名 / 手机号 / 单位，存入本地档案。"""
+    """登录后采集姓名 / 手机号 / 单位 / 账号契约，存入本地档案。"""
     prof = profile_mod.load()
     data: dict[str, Any] = {}
+    contract_line = ""
     try:
         s = Session()
         s.load()
         org = api.my_org(s)
         if org.get("SZDWDM"):
             data["JYDWDM"] = org["SZDWDM"]
+        role, codes = api.borrow_contract(s)
+        if api.default_borrow_type(role):
+            data["borrow_role"] = role
+            data["JSJYLXDM"] = api.default_borrow_type(role)
+            contract_line = _contract_line(role, codes)
     except Exception:  # noqa: BLE001
         pass
 
     name = name or prof.get("JYRXM") or ""
     phone = phone or prof.get("JYRDH") or ""
     if sys.stdin.isatty():
-        if not phone:
-            phone = typer.prompt(
-                "手机号（教室借用申请的联系方式，可留空稍后填）",
-                default="",
-                show_default=False,
-            )
-        if not name:
-            name = typer.prompt("姓名（回车用系统默认）", default="", show_default=False)
+        try:
+            if not phone:
+                phone = typer.prompt(
+                    "手机号（教室借用申请的联系方式，可留空稍后填）",
+                    default="",
+                    show_default=False,
+                )
+            if not name:
+                name = typer.prompt("姓名（回车用系统默认）", default="", show_default=False)
+        except typer.Abort:  # 非交互环境（stdin 到 EOF）：跳过提问，保留已采集字段
+            pass
     if name:
         data["JYRXM"] = name
     if phone:
@@ -182,9 +202,13 @@ def _collect_profile(phone: str | None, name: str | None) -> None:
     if data:
         p = profile_mod.save(data)
         console.print(f"✓ 档案已保存：{p}")
-        console.print(
-            f"  姓名={data.get('JYRXM', '')}  手机={data.get('JYRDH', '')}  单位={data.get('JYDWDM', '')}"
+        line = (
+            f"  姓名={data.get('JYRXM', '')}  手机={data.get('JYRDH', '')}"
+            f"  单位={data.get('JYDWDM', '')}"
         )
+        if contract_line:
+            line += f"  契约={contract_line}"
+        console.print(line)
 
 
 @app.command("profile")
@@ -217,6 +241,8 @@ def profile_cmd(
         ("JSJYLXDM", "借用类型"),
     ):
         console.print(f"  {label}: {prof.get(key, '')}")
+    if prof.get("borrow_role"):
+        console.print(f"  契约: {ROLE_LABELS.get(prof['borrow_role'], prof['borrow_role'])}")
 
 
 @app.command()
@@ -226,12 +252,16 @@ def doctor(json_out: bool = typer.Option(False, "--json")) -> None:
     term = api.current_term(s)
     params = api.system_params(s)
     org = api.my_org(s)
+    role, codes = api.borrow_contract(s)
     info = {
         "ok": bool(term),
         "term": term,
         "JSJYSFKT": params.get("JSJYSFKT"),
         "JYSJFW": params.get("JYSJFW"),
         "org": org.get("DWDM") or org.get("SZDWDM"),
+        "role": role,
+        "borrow_type_default": api.default_borrow_type(role),
+        "borrow_types": codes,
     }
     if json_out:
         _dump(info)
@@ -242,6 +272,9 @@ def doctor(json_out: bool = typer.Option(False, "--json")) -> None:
     console.print(f"  可借日期 JYSJFW：{params.get('JYSJFW', '?')}")
     if org:
         console.print(f"  所在单位代码：{org.get('DWDM') or org.get('SZDWDM', '?')}")
+    console.print(f"  账号契约：{_contract_line(role, codes)}")
+    if codes:
+        console.print(f"  可用借用类型：{api.borrow_type_hint(codes)}")
     if not term:
         err_console.print("[yellow]警告：拿不到学期信息，可能登录态已过期。[/yellow]")
 
@@ -330,7 +363,9 @@ def plan(
         help="是否把意向教室写进用途描述",
     ),
     allow_overlap: bool = typer.Option(
-        False, "--allow-overlap", help="允许与已有申请时间重叠（默认拦截）"
+        False,
+        "--allow-overlap",
+        help="允许与已有申请重复（四项：日期/校区/节次/教室，默认拦截）",
     ),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
@@ -343,15 +378,17 @@ def plan(
         raise typer.Exit(2)
 
     term = api.current_term(s)
-    slots, rooms = planner.existing_usage(s, term)
-    if slots and not json_out:
-        console.print(f"[dim]已有申请 {len(slots)} 条，已纳入防重合检测[/dim]")
+    role, codes = api.borrow_contract(s)
+    if not json_out:
+        console.print(f"[dim]账号契约：{_contract_line(role, codes)}[/dim]")
+    existing = planner.existing_usage(s, term)
+    if existing and not json_out:
+        console.print(f"[dim]已有申请 {len(existing)} 条，已纳入防重检测[/dim]")
     assignments = planner.build_plan(
         s,
         activities,
         applicant,
-        existing_slots=slots,
-        existing_rooms=rooms,
+        existing=existing,
         allow_overlap=allow_overlap,
     )
 
@@ -366,7 +403,7 @@ def plan(
                 "ok": "[green]OK[/green]",
                 "no_room": "[red]无教室[/red]",
                 "too_small": "[yellow]容量不足[/yellow]",
-                "duplicate": "[yellow]时间重叠[/yellow]",
+                "duplicate": "[yellow]重复[/yellow]",
                 "error": "[red]错误[/red]",
             }.get(a.status, a.status)
             if a.note:
@@ -390,11 +427,21 @@ def plan(
         return
 
     results = planner.save_plan(
-        s, assignments, applicant, room_in_purpose=room_in_purpose, submit=submit
+        s,
+        assignments,
+        applicant,
+        room_in_purpose=room_in_purpose,
+        submit=submit,
+        contract=(role, codes),
     )
     if json_out:
         _dump(
             {
+                "contract": {
+                    "role": role,
+                    "borrow_type_default": api.default_borrow_type(role),
+                    "borrow_types": codes,
+                },
                 "assignments": [a.model_dump(mode="json") for a in assignments],
                 "results": results,
             }
@@ -458,11 +505,18 @@ def borrow_draft(
     submit: bool = typer.Option(False, "--submit", help="⚠️ 正式提交（默认关闭，仅保存草稿）"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """批量保存教室借用申请草稿（默认不提交）。"""
+    """批量保存教室借用申请草稿（默认不提交）；借用类型按当前账号字典校验。"""
     s = _session()
     reqs = _load_requests(file, data)
+    role, codes = api.borrow_contract(s)
     results: list[dict[str, Any]] = []
     for i, req in enumerate(reqs, 1):
+        problem = api.check_borrow_type(req.JSJYLXDM, role, codes)
+        if problem:
+            results.append({"index": i, "ok": False, "code": None, "msg": problem})
+            if not json_out:
+                console.print(f"[red]✗[/red] #{i} {req.JYYTMS[:24]} -> {problem}")
+            continue
         res = api.save_borrow(s, req, submit=submit)
         results.append({"index": i, "ok": res.ok, "code": res.code, "msg": res.msg})
         if not json_out:

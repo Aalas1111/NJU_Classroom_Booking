@@ -265,3 +265,50 @@ querySetting=[]
 - 登录态快照：`D:\Coding\CursorProjects\pi_workspace\nju-auth-state.json`
 - Playwright 持久化 profile：`D:\Coding\CursorProjects\pi_workspace\.nju-playwright-profile`
 - 截图（登录页）：`D:\Coding\CursorProjects\pi_workspace\nju-login.png`
+
+---
+
+## 7. 教师端账号探测（2026-09-28，实测）
+
+借教师账号（工号 `0412007`，姓名 郭亚敏，所在单位 `200300` = 本科生院，`RZLBDM=99999`）
+用 `crb login` + 独立登录态文件跑通，接口与字段结构与学生端完全一致，差异只在**字典**：
+
+- `cxyhszdw.do` → `SZDWDM=200300`（借用单位，即 `JYDWDM`）；教师记录里 `JYDWDM=200300` 显示为「本科生院」。
+- `cxjsjylx.do`（借用类型）返回**教师端字典**，与学生端是两套：
+  - 教师端：`07` 教师教学、补课 / `09` 团学活动 / `21` 长期借用 / `39` 考试 / `40` 讲座
+  - 学生端：`01` 辅导员 / `02` 学生社团管理部 / `03` 就业指导中心 / `04` 国际合作与交流处 /
+    `05` 学生工作处 / `06` 校团委 / `13` 待悦读课程管理
+- 同一个 `JSJYLXDM` 字段，两端的表单标签也不同：学生端是「指导教师所在单位」（字典=单位名），
+  教师端是「借用类型」（字典=活动类型）；教师端没有「指导教师所在单位」这个字段。
+- `crb plan` 只读链路在教师账号下全部可用：`cxkxjs.do` 查空闲教室（仙林 09-30 1-2 节 165 间）、
+  `cxrqdydzcxq.do` 日期→周次、`cxjsjysq.do` 我的申请（19 条，含已通过/不通过）。
+
+教师端一条已通过记录的关键字段（`cxjsjysq.do`）：
+
+```
+JYDWDM=200300(本科生院)  JYRXM=郭亚敏  SQR=0412007  JASJYLXDM=09(团学活动)
+XXXQDM=4(苏州校区)  KSRQ=JSRQ=2026-09-26  KSJC=5  JSJC=7  JYFSDM=0  JYLYDM=02
+CQDQJY=2  JSRL=20  ZRS=20  JYSL=1  FJ=null  FZLS=null  KSRS=null  XQ=null  ZC=null
+JASMC=南雍-东122（审核通过后由管理员分配，申请时不填）
+```
+
+结论（已落到 `crb` 代码）：
+
+- 契约按 `cxjsjylx.do` 返回的字典判定（`api.borrow_contract`），不猜账号属性：
+  字典含教师端代码 → 教师端契约，默认 `JSJYLXDM=09`（团学活动）；否则学生端契约，默认 `02`。
+- `plan --save/--submit` 与 `borrow draft` 都会用当前账号字典校验 `JSJYLXDM`，
+  把学生端代码提交到教师端会直接报错并列出可用值，不会静默改写。
+- 教师端「指定教室」同样只是意向（`JYYTMS` 里写教室名），正式教室由本科生院审核后分配（`JASMC`）。
+- 端到端验证（2026-09-28，教师账号）：
+  - 草稿：`plan --save` → 回读 `SHZT=暂存` / `JASJYLXDM=09 团学活动` / `JYDWDM=200300` /
+    `FJ=意向教室` → `borrow delete` 删除；
+  - 正式提交：`plan --submit` → 回读 `SHZT=70 待本科生院审核` → `shjsjysq.do` 撤回
+    （`SHZT=1 已撤回`）→ `scjssq.do` 删除；
+  - 记录数 19 → 20 → 19，无残留；撤回参数 `JSJYSQLX=6` + `CQDQJY=2` 在教师端同样适用。
+
+> 参照物：教师自研的油猴脚本「教室借用自动填写 v0.14.5」也按字典前后缀填表，
+> 但它的 `BORROW_TYPE_CODE` 是 `01 教师教学、补课 / 09 团学活动 / 10 考试 / 11 讲座`，
+> 与实测字典只有 `09` 对得上（其余为陈旧值）；其直连提交路径会用到这套码，需留意。
+> 它判定重复的口径是「日期+校区+节次+教室」四项（`recordMatchEvidence`，
+> 教室证据取用途 + `JASMC`，名字做了归一化）；`crb` 已按同一口径重写（2026-09-28）：
+> 四项一致（节次区间有重叠也算）才判 `duplicate`，**时段重叠但教室不同不算重复**。

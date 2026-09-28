@@ -55,6 +55,33 @@ CQDQJY_LONG = "1"  # 长期
 TYPE_SAVE = "save"
 TYPE_SUBMIT = "TJ"
 
+# ---- 借用类型 JSJYLXDM：同一字段，学生端 / 教师端两套字典 ----
+# 服务端按登录账号返回对应字典（cxjsjylx.do），以此判定契约，不猜账号属性。
+# 学生端（2026-09 学生账号实测）：字典是「指导教师所在单位」口径
+STUDENT_BORROW_TYPES = {
+    "01": "辅导员",
+    "02": "学生社团管理部",
+    "03": "就业指导中心",
+    "04": "国际合作与交流处",
+    "05": "学生工作处",
+    "06": "校团委",
+    "13": "待悦读课程管理",
+}
+# 教师端（2026-09 教师账号实测）：字典是活动类型口径
+TEACHER_BORROW_TYPES = {
+    "07": "教师教学、补课",
+    "09": "团学活动",
+    "21": "长期借用",
+    "39": "考试",
+    "40": "讲座",
+}
+ROLE_STUDENT = "student"
+ROLE_TEACHER = "teacher"
+ROLE_UNKNOWN = "unknown"
+ROLE_LABELS = {ROLE_STUDENT: "学生端", ROLE_TEACHER: "教师端", ROLE_UNKNOWN: "未知契约"}
+# 计划/档案都没指定借用类型时，按契约取的默认值
+DEFAULT_BORROW_TYPE = {ROLE_STUDENT: "02", ROLE_TEACHER: "09"}
+
 
 def state_path() -> Path:
     """登录态文件位置，可用环境变量 CRB_AUTH_FILE 覆盖。"""
