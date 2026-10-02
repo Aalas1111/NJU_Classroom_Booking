@@ -6,6 +6,11 @@
 ## Unreleased
 
 ### Added
+- **一条申请多间教室**（`Activity.rooms`，2026-10-02）：学校端本来就有「借用数量」
+  （`JYSL`）这一档，以前一条活动只带一间意向教室。现在 `rooms` 是数组——给几间就排几间
+  （某间不可用 → 补一间「容量刚好够用」的，间数不变，note 说清楚；某间与已有申请重复
+  → 只摘那一间，其余照排）。落表时 `JYSL`=间数、`FJ` 与用途描述列意向、`JSRL`=合计容量。
+  旧的单间 `preferred_room` 仍兼容。上游契约见 yuque-agent 的 `docs/handoff.md` §2.1（schema 3.0）。
 
 - **账号姓名读得到**：`crb doctor --json` 现在带上 `name` / `account`
   （来自应用页的 `_JW_INIT_CONFIG.username`，学生号实测「李赫」）；`crb login` 采集档案时

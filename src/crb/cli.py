@@ -642,8 +642,8 @@ def plan(
         for col in ("活动", "日期", "节次", "人数", "教室", "容量", "状态"):
             table.add_column(col)
         for a in assignments:
-            room = a.room.room_name if a.room else ""
-            cap = (a.room.seat_class or a.room.seat_exam) if a.room else ""
+            room = "、".join(r.room_name for r in a.rooms)
+            cap = sum((r.seat_class or r.seat_exam or 0) for r in a.rooms)
             mark = {
                 "ok": "[green]OK[/green]",
                 "no_room": "[red]无教室[/red]",

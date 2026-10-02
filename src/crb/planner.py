@@ -152,11 +152,15 @@ def build_plan(
     existing: list[ExistingBooking] | None = None,
     allow_overlap: bool = False,
 ) -> list[Assignment]:
-    """为每条活动分配一间空闲教室，并做批次内 + 跨批次防重。
+    """为每条活动分配空闲教室（**一条活动可以要多间**），并做批次内 + 跨批次防重。
 
     去重口径与教师侧脚本对齐：**日期 + 校区 + 节次 + 教室** 四项才算重复
     （节次区间有重叠、其余三项一致也算）；只是时段重叠、教室不同**不算**重复
     ——并行活动（同时间不同教室/校区）是正常需求。
+
+    意向教室（``rooms``，可多间；兼容旧的单间 ``preferred_room``）只是**意向**：
+    某间不可用就按「容量刚好够用」补一间并记 note——要几间就排几间
+    （学校端按申请里的「借用数量」分配同样多的教室，具体哪间由管理员定）。
     """
     existing = existing or []
     used: dict[tuple[str, str, str], list[tuple[int, int]]] = {}
@@ -179,12 +183,28 @@ def build_plan(
             )
             continue
 
-        # 跨批次：意向教室若与已有申请四项一致，直接判重（不必再查空闲）
-        if act.preferred_room and not allow_overlap:
-            hit = _match_existing(campus, act.date, a1, a2, act.preferred_room, existing)
-            if hit:
-                results.append(_duplicate_assignment(act, hit))
+        # 意向教室：rooms 优先，兼容旧 plan 的单间 preferred_room
+        wanted = [str(r).strip() for r in (act.rooms or []) if str(r).strip()]
+        if not wanted and act.preferred_room:
+            wanted = [act.preferred_room.strip()]
+        notes: list[str] = []
+
+        # 跨批次：意向教室若与已有申请四项一致，先摘掉（没必要再查空闲）；
+        # 全都重复 → 整条判 duplicate
+        if wanted and not allow_overlap:
+            kept: list[str] = []
+            dup_hit: tuple[ExistingBooking, bool] | None = None
+            for name in wanted:
+                hit = _match_existing(campus, act.date, a1, a2, name, existing)
+                if hit:
+                    dup_hit = dup_hit or hit
+                    notes.append(f"意向教室 {name} 与已有申请重复，未纳入")
+                else:
+                    kept.append(name)
+            if not kept and dup_hit is not None:
+                results.append(_duplicate_assignment(act, dup_hit))
                 continue
+            wanted = kept
 
         try:
             rooms = api.free_rooms(
@@ -237,25 +257,48 @@ def build_plan(
                 )
             continue
 
-        chosen: FreeRoomSlot | None = None
-        pref_missed = False
-        if act.preferred_room:
-            wanted = room_key(act.preferred_room)
-            chosen = next((r for r in avail if room_key(r.room_name) == wanted), None)
-            pref_missed = chosen is None
-        if chosen is None:
+        chosen: list[FreeRoomSlot] = []
+        if wanted:
+            for name in wanted:
+                key = room_key(name)
+                pick = next((r for r in avail if room_key(r.room_name) == key), None)
+                if pick is not None and pick not in chosen:
+                    chosen.append(pick)
+                else:
+                    notes.append(f"意向教室 {name} 不可用，已改选")
+            # 补足：不可用的意向用「容量刚好够用」的空闲教室补上（要几间就排几间）
+            need = len(wanted) - len(chosen)
+            if need > 0:
+                pool = [r for r in avail if r not in chosen]
+                chosen += sorted(pool, key=lambda r: (_capacity(r), r.room_name))[:need]
+            if len(chosen) < len(wanted):
+                notes.append(f"只凑到 {len(chosen)} 间（意向 {len(wanted)} 间）")
+        else:
             # 容量刚好够用的优先，避免占用大教室
-            chosen = sorted(avail, key=lambda r: (_capacity(r), r.room_name))[0]
+            chosen = [sorted(avail, key=lambda r: (_capacity(r), r.room_name))[0]]
 
-        if not allow_overlap:
-            hit = _match_existing(campus, act.date, a1, a2, chosen.room_name, existing)
+        # 选中的教室再各判一次四项防重（补选的可能恰好撞上已有申请）
+        final: list[FreeRoomSlot] = []
+        dup_hit = None
+        for room in chosen:
+            hit = None
+            if not allow_overlap:
+                hit = _match_existing(campus, act.date, a1, a2, room.room_name, existing)
             if hit:
-                results.append(_duplicate_assignment(act, hit))
+                dup_hit = dup_hit or hit
+                notes.append(f"教室 {room.room_name} 与已有申请重复，未纳入")
                 continue
+            final.append(room)
+        if not final:
+            if dup_hit is not None:
+                results.append(_duplicate_assignment(act, dup_hit))
+            else:
+                results.append(Assignment(activity=act, status="no_room", note="候选教室不可用"))
+            continue
 
-        used.setdefault((str(campus), room_key(chosen.room_name), act.date), []).append((a1, a2))
-        note = f"意向教室 {act.preferred_room} 不可用，已改选" if pref_missed else ""
-        results.append(Assignment(activity=act, room=chosen, status="ok", note=note))
+        for room in final:
+            used.setdefault((str(campus), room_key(room.room_name), act.date), []).append((a1, a2))
+        results.append(Assignment(activity=act, rooms=final, status="ok", note="；".join(notes)))
 
     return results
 
@@ -269,9 +312,13 @@ def to_request(
     week_cache: dict[str, dict[str, Any]] | None = None,
     room_in_purpose: bool = True,
 ) -> BorrowRequest:
-    """把一条分配结果转成学校接口需要的申请对象。"""
+    """把一条分配结果转成学校接口需要的申请对象。
+
+    一条申请可以带**多间教室**（2026-10-02）：``JYSL``（借用数量）= 间数、
+    ``FJ`` 列意向教室、用途描述里也带上——管理员按数量分配同样多的教室。
+    """
     act = assignment.activity
-    room = assignment.room
+    rooms = list(assignment.rooms)
     a1, a2 = parse_period(act.period)
 
     week_cache = week_cache if week_cache is not None else {}
@@ -281,9 +328,12 @@ def to_request(
     if not info.get("ZC") or not info.get("XQJ"):
         raise RuntimeError(f"无法把 {act.date} 换算成周次/星期（校历可能未配置）")
 
+    names = [r.room_name for r in rooms]
     title = act.title
-    if room_in_purpose and room:
-        title = f"{title}（意向：{room.room_name}）"
+    if room_in_purpose and names:
+        title = f"{title}（意向：{'、'.join(names)}）"
+    # JSRL = 教室容量：多间时给**合计**（单间与旧行为一致；真机验收时核对学校怎么读这一栏）
+    total_capacity = sum(_capacity(r) for r in rooms)
 
     return BorrowRequest(
         JYDWDM=act.JYDWDM or applicant.JYDWDM,
@@ -292,7 +342,7 @@ def to_request(
         JYYTMS=title,
         JSJYLXDM=act.JSJYLXDM or applicant.JSJYLXDM,
         XXXQDM=act.campus or applicant.campus,
-        JSRL=str(_capacity(room) if room else ""),
+        JSRL=str(total_capacity) if rooms else "",
         XNXQDM=term,
         KSRQ=act.date,
         JSRQ=act.date,
@@ -301,7 +351,8 @@ def to_request(
         KSJC=str(a1),
         JSJC=str(a2),
         ZRS=str(act.people),
-        FJ=(room.room_name if room else ""),
+        JYSL=str(max(len(rooms), 1)),
+        FJ="、".join(names),
     )
 
 

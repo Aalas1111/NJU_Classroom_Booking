@@ -209,7 +209,11 @@ class Activity(BaseModel):
     campus: str | None = None
     building: str | None = None
     room_type: str | None = None
+    rooms: list[str] | None = None
+    """意向教室，**可以多间**：一条申请同时申请多间教室（学校端「借用数量」= 间数）。
+    空/缺省 = 随机一间。"""
     preferred_room: str | None = None
+    """**旧字段（单间）**：兼容手写的旧 plan；与 ``rooms`` 同给时以 ``rooms`` 为准。"""
     # 可选：覆盖 defaults 里的借用人信息
     JYDWDM: str | None = None
     JYRXM: str | None = None
@@ -231,10 +235,14 @@ class Applicant(BaseModel):
 
 
 class Assignment(BaseModel):
-    """一条活动的分配结果。"""
+    """一条活动的分配结果。
+
+    ``rooms`` 是**一组**教室：一条申请可以同时申请多间（2026-10-02，学校端
+    「借用数量」）。单间就是只有一个元素的列表。
+    """
 
     activity: Activity
-    room: FreeRoomSlot | None = None
-    status: str = "ok"  # ok / no_room / too_small / error
+    rooms: list[FreeRoomSlot] = Field(default_factory=list)
+    status: str = "ok"  # ok / no_room / too_small / duplicate / error
     note: str = ""
     request: dict[str, Any] | None = None  # 生成的借用申请（--save 用）

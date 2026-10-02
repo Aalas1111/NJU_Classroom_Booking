@@ -199,7 +199,7 @@ def test_build_plan_avoids_existing_room(monkeypatch) -> None:
         existing=[_booking(room="A")],
     )
     assert res[0].status == "ok"
-    assert res[0].room is not None and res[0].room.room_name == "B"
+    assert [r.room_name for r in res[0].rooms] == ["B"]
 
 
 def test_save_plan_follows_account_contract(monkeypatch) -> None:
@@ -221,7 +221,7 @@ def test_save_plan_follows_account_contract(monkeypatch) -> None:
 
     def _assignment(title: str, code: str | None = None) -> Assignment:
         act = Activity(title=title, date="2026-09-10", period="1-2", people=10, JSJYLXDM=code)
-        return Assignment(activity=act, room=_slot("仙Ⅰ-203", 96), status="ok")
+        return Assignment(activity=act, rooms=[_slot("仙Ⅰ-203", 96)], status="ok")
 
     res = planner.save_plan(
         None,  # type: ignore[arg-type]
@@ -268,7 +268,7 @@ def test_save_plan_reports_actual_type(monkeypatch) -> None:
 
 def test_to_request_fills_borrow_fields() -> None:
     act = Activity(title="例会", date="2026-09-10", period="1-2", people=30)
-    assignment = Assignment(activity=act, room=_slot("仙Ⅰ-203", 96), status="ok")
+    assignment = Assignment(activity=act, rooms=[_slot("仙Ⅰ-203", 96)], status="ok")
     applicant = Applicant(
         JYDWDM="400760", JYRXM="李赫", JYRDH="13800000000", JSJYLXDM="02", campus="3"
     )
@@ -290,3 +290,100 @@ def test_to_request_fills_borrow_fields() -> None:
     assert payload["TYPE"] == "save"
     assert "仙Ⅰ-203" in payload["JYYTMS"]
     assert payload["FJ"] == "仙Ⅰ-203"
+
+
+# ---------------------------------------------------------------- 多间教室（2026-10-02）
+
+
+def test_build_plan_assigns_multiple_rooms_in_order(monkeypatch) -> None:
+    """rooms 给几间就排几间，顺序照抄（不可用时才动）。"""
+    monkeypatch.setattr(
+        planner.api, "free_rooms", lambda *a, **k: [_slot("A", 50), _slot("B", 60), _slot("C", 70)]
+    )
+    acts = [
+        Activity(
+            title="固定借用", date="2026-09-10", period="1-2", people=10, rooms=["C", "A", "B"]
+        )
+    ]
+    res = planner.build_plan(None, acts, Applicant(campus="3"))  # type: ignore[arg-type]
+    assert res[0].status == "ok"
+    assert [r.room_name for r in res[0].rooms] == ["C", "A", "B"]
+    assert res[0].note == ""
+
+
+def test_build_plan_replaces_unavailable_room_and_keeps_count(monkeypatch) -> None:
+    """某间意向不可用 → 用「容量刚好够用」的补上，间数不变，note 说清楚。"""
+    monkeypatch.setattr(planner.api, "free_rooms", lambda *a, **k: [_slot("A", 50), _slot("B", 60)])
+    acts = [
+        Activity(title="固定借用", date="2026-09-10", period="1-2", people=10, rooms=["A", "X"])
+    ]
+    res = planner.build_plan(None, acts, Applicant(campus="3"))  # type: ignore[arg-type]
+    assert res[0].status == "ok"
+    assert [r.room_name for r in res[0].rooms] == ["A", "B"], "X 不可用 → 补了 B"
+    assert "意向教室 X 不可用，已改选" in res[0].note
+
+
+def test_build_plan_drops_duplicate_room_but_keeps_the_rest(monkeypatch) -> None:
+    """某一间与已有申请重复 → 只摘那一间，其余照排（不是整条判重）。"""
+    monkeypatch.setattr(planner.api, "free_rooms", lambda *a, **k: [_slot("A", 50), _slot("B", 60)])
+    acts = [
+        Activity(title="固定借用", date="2026-09-10", period="1-2", people=10, rooms=["A", "B"])
+    ]
+    res = planner.build_plan(
+        None,  # type: ignore[arg-type]
+        acts,
+        Applicant(campus="3"),
+        existing=[_booking(room="A")],
+    )
+    assert res[0].status == "ok"
+    assert [r.room_name for r in res[0].rooms] == ["B"]
+    assert "意向教室 A 与已有申请重复" in res[0].note
+
+
+def test_build_plan_all_rooms_duplicate_is_a_duplicate(monkeypatch) -> None:
+    """意向全和已有申请重复 → 整条判 duplicate（不必再查空闲教室）。"""
+
+    def _boom(*a, **k):
+        raise AssertionError("不应查询空闲教室")
+
+    monkeypatch.setattr(planner.api, "free_rooms", _boom)
+    acts = [
+        Activity(title="固定借用", date="2026-09-10", period="1-2", people=10, rooms=["A", "B"])
+    ]
+    res = planner.build_plan(
+        None,  # type: ignore[arg-type]
+        acts,
+        Applicant(campus="3"),
+        existing=[_booking(room="A"), _booking(room="B")],
+    )
+    assert res[0].status == "duplicate"
+
+
+def test_to_request_multi_room_fields() -> None:
+    """一条申请多间教室在学校接口里的落法：JYSL=间数、FJ 与用途描述列意向、JSRL=合计容量。"""
+    act = Activity(title="固定借用", date="2026-09-10", period="1-2", people=30)
+    assignment = Assignment(
+        activity=act,
+        rooms=[_slot("仙Ⅰ-203", 96), _slot("仙Ⅰ-204", 50)],
+        status="ok",
+    )
+    req = planner.to_request(
+        None,  # type: ignore[arg-type]
+        assignment,
+        Applicant(JYDWDM="400760", JYRXM="李赫", campus="3"),
+        term="2026-2027-1",
+        week_cache={"2026-09-10": {"ZC": 3, "XQJ": 4}},
+    )
+    payload = req.as_payload()
+    assert payload["JYSL"] == "2"
+    assert payload["FJ"] == "仙Ⅰ-203、仙Ⅰ-204"
+    assert payload["JSRL"] == "146"
+    assert "仙Ⅰ-203" in payload["JYYTMS"] and "仙Ⅰ-204" in payload["JYYTMS"]
+
+
+def test_activity_legacy_preferred_room_still_works(monkeypatch) -> None:
+    """旧 plan 的单间 preferred_room 继续可用（等价于 rooms=[it]）。"""
+    monkeypatch.setattr(planner.api, "free_rooms", lambda *a, **k: [_slot("A", 50), _slot("B", 60)])
+    acts = [Activity(title="x", date="2026-09-10", period="1-2", people=10, preferred_room="B")]
+    res = planner.build_plan(None, acts, Applicant(campus="3"))  # type: ignore[arg-type]
+    assert [r.room_name for r in res[0].rooms] == ["B"]
