@@ -703,14 +703,31 @@ def plan(
 @borrow_app.command("list")
 def borrow_list(
     term: str | None = typer.Option(None, "--term", help="学年学期，默认自动获取"),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="只看这天（YYYY-MM-DD）及以后提交的；按页翻到第一条更早的记录就停",
+    ),
+    max_pages: int = typer.Option(10, "--max-pages", help="--since 时最多翻几页（每页 100 条）"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
     """查看我的教室借用申请。"""
     s = _session()
     term = term or api.current_term(s)
-    rows = api.list_borrows(s, term)
+    meta: dict[str, Any] = {}
+    if since:
+        rows, meta = api.list_borrows_window(s, term, since=since, max_pages=max_pages)
+    else:
+        rows = api.list_borrows(s, term)
     if json_out:
-        _dump([{k: v for k, v in r.model_dump().items() if v not in (None, "")} for r in rows])
+        dump_rows = [{k: v for k, v in r.model_dump().items() if v not in (None, "")} for r in rows]
+        # 带 --since 时输出 {"total": …, "pages": …, "rows": […]}
+        # （total = 学校给的本学期总数，用来给「共 N 条」一个诚实的数）
+        _dump(
+            {"total": meta.get("total"), "pages": meta.get("pages"), "rows": dump_rows}
+            if since
+            else dump_rows
+        )
         return
     if not rows:
         console.print("（暂无申请记录）")

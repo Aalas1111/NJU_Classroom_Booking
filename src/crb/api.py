@@ -361,6 +361,66 @@ def list_borrows(session: Session, term: str, page_size: int = 100) -> list[Borr
     return [BorrowRecord.model_validate(r) for r in _rows(resp, "cxjsjysq")]
 
 
+def _total_of(resp: Any, key: str) -> int | None:
+    """列表接口带的 ``totalSize``（没有就 None）——「本学期共 N 条」要个诚实的数。"""
+    try:
+        total = _datas(resp).get(key, {}).get("totalSize")
+        return int(total) if total is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def list_borrows_window(
+    session: Session,
+    term: str,
+    *,
+    since: str = "",
+    page_size: int = 100,
+    max_pages: int = 10,
+) -> tuple[list[BorrowRecord], dict[str, Any]]:
+    """**按提交日期倒序翻页**取申请，翻到出现早于 ``since`` 的记录就停。
+
+    列表在一个学期里会不断累积（几百条不稀奇），全量拉既慢、又会把工具的返回撑爆——
+    而绝大多数问题只关心最近一段（默认近一周）。因为服务端已按 ``-SQRQ``（提交日期）
+    倒序，翻页可以在「翻到比窗口起点更早的那条」时立刻停：通常一页就够。
+    ``since`` 为空 = 只取第一页（与 :func:`list_borrows` 行为一致）。
+
+    返回 ``(records, meta)``；``meta = {"total": totalSize|None, "pages": 翻了几页,
+    "exhausted": 是否翻到了头}``。
+    """
+    collected: list[BorrowRecord] = []
+    total: int | None = None
+    pages = 0
+    exhausted = False
+    page = 1
+    while page <= max_pages:
+        resp = session.post_form(
+            EP_LIST,
+            {
+                "pageSize": page_size,
+                "pageNumber": page,
+                "XNXQDM": term,
+                "*order": "-SQRQ",
+                "querySetting": "[]",
+            },
+        )
+        if total is None:
+            total = _total_of(resp, "cxjsjysq")
+        page_rows = _rows(resp, "cxjsjysq")
+        pages += 1
+        collected.extend(BorrowRecord.model_validate(r) for r in page_rows)
+        if len(page_rows) < page_size:
+            exhausted = True  # 这页不满 = 没有下一页了
+            break
+        if not since:
+            break
+        oldest = str((page_rows[-1] or {}).get("SQRQ") or "")[:10]
+        if oldest and oldest < since:
+            break  # 已越过窗口起点：后面的只会更旧，收工
+        page += 1
+    return collected, {"total": total, "pages": pages, "exhausted": exhausted}
+
+
 def delete_borrow(session: Session, sqbh: str) -> SaveResult:
     """删除申请/草稿（scjssq.do）。实测对草稿也生效。"""
     resp = session.post_form(EP_DELETE, {"param": json.dumps([{"SQBH": sqbh}], ensure_ascii=False)})
