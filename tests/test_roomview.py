@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from ansi_text import plain
 from typer.testing import CliRunner
 
 from crb import roomview
@@ -202,7 +203,7 @@ def test_day_view_match_filter_narrows_without_extra_requests():
 def test_cli_day_help():
     result = CliRunner().invoke(app, ["day", "--help"])
     assert result.exit_code == 0
-    assert "--building" in result.output and "--match" in result.output
+    assert "--building" in plain(result.output) and "--match" in plain(result.output)
 
 
 # ---------------------------------------------------------------- 小工具
@@ -216,10 +217,10 @@ def test_period_time_helpers():
 def test_cli_room_help_mentions_options():
     result = CliRunner().invoke(app, ["room", "--help"])
     assert result.exit_code == 0
-    assert "--room" in result.output and "--date" in result.output
+    assert "--room" in plain(result.output) and "--date" in plain(result.output)
     result = CliRunner().invoke(app, ["rooms", "--help"])
     assert result.exit_code == 0
-    assert "--match" in result.output
+    assert "--match" in plain(result.output)
 
 
 # ---------------------------------------------------------------- 多日期（「这几天哪天有空」）
@@ -229,7 +230,7 @@ def test_free_command_validates_dates_before_touching_the_session():
 
     result = CliRunner().invoke(crb_app, ["free", "-c", "3", "-d", "2026-09-30,明天", "-p", "1-2"])
     assert result.exit_code == 2
-    assert "YYYY-MM-DD" in result.output
+    assert "YYYY-MM-DD" in plain(result.output)
 
 
 def test_free_command_caps_the_number_of_dates():
@@ -238,7 +239,7 @@ def test_free_command_caps_the_number_of_dates():
     many = ",".join(f"2026-{m:02d}-{d:02d}" for m in (9, 10) for d in range(1, 32))
     result = CliRunner().invoke(crb_app, ["free", "-c", "3", "-d", many, "-p", "1-2"])
     assert result.exit_code == 2
-    assert "最多" in result.output
+    assert "最多" in plain(result.output)
 
 
 def test_is_iso_date():

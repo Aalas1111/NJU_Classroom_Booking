@@ -320,7 +320,7 @@ def test_build_plan_replaces_unavailable_room_and_keeps_count(monkeypatch) -> No
     res = planner.build_plan(None, acts, Applicant(campus="3"))  # type: ignore[arg-type]
     assert res[0].status == "ok"
     assert [r.room_name for r in res[0].rooms] == ["A", "B"], "X 不可用 → 补了 B"
-    assert "意向教室 X 不可用，已改选" in res[0].note
+    assert "意向教室 X 不可用" in res[0].note
 
 
 def test_build_plan_drops_duplicate_room_but_keeps_the_rest(monkeypatch) -> None:
@@ -387,3 +387,25 @@ def test_activity_legacy_preferred_room_still_works(monkeypatch) -> None:
     acts = [Activity(title="x", date="2026-09-10", period="1-2", people=10, preferred_room="B")]
     res = planner.build_plan(None, acts, Applicant(campus="3"))  # type: ignore[arg-type]
     assert [r.room_name for r in res[0].rooms] == ["B"]
+
+
+def test_build_plan_replacement_respects_people_capacity(monkeypatch) -> None:
+    """意向教室容量不够 → 换成**容量达标的**；产出里每一间都必须满足人数。"""
+    monkeypatch.setattr(
+        planner.api, "free_rooms", lambda *a, **k: [_slot("A", 20), _slot("B", 60), _slot("C", 70)]
+    )
+    acts = [Activity(title="x", date="2026-09-10", period="1-2", people=50, rooms=["A", "B"])]
+    res = planner.build_plan(None, acts, Applicant(campus="3"))  # type: ignore[arg-type]
+    assert res[0].status == "ok"
+    assert [r.room_name for r in res[0].rooms] == ["B", "C"], "A（20 座）不够 50 人 → 补 C"
+    assert all((r.seat_class or 0) >= 50 for r in res[0].rooms), "每一间都要满足人数"
+    assert "容量不足" in res[0].note and "A" in res[0].note
+
+
+def test_build_plan_dedupes_repeated_room_names(monkeypatch) -> None:
+    """同一间写两遍 → 去重后按一间处理，不产生「不可用」的假提示。"""
+    monkeypatch.setattr(planner.api, "free_rooms", lambda *a, **k: [_slot("A", 50), _slot("B", 60)])
+    acts = [Activity(title="x", date="2026-09-10", period="1-2", people=10, rooms=["A", "A", "B"])]
+    res = planner.build_plan(None, acts, Applicant(campus="3"))  # type: ignore[arg-type]
+    assert [r.room_name for r in res[0].rooms] == ["A", "B"]
+    assert res[0].note == ""

@@ -183,8 +183,9 @@ def build_plan(
             )
             continue
 
-        # 意向教室：rooms 优先，兼容旧 plan 的单间 preferred_room
+        # 意向教室：rooms 优先，兼容旧 plan 的单间 preferred_room（重复写法按原序去重）
         wanted = [str(r).strip() for r in (act.rooms or []) if str(r).strip()]
+        wanted = list(dict.fromkeys(wanted))
         if not wanted and act.preferred_room:
             wanted = [act.preferred_room.strip()]
         notes: list[str] = []
@@ -259,14 +260,23 @@ def build_plan(
 
         chosen: list[FreeRoomSlot] = []
         if wanted:
+            # 空闲教室里按名索引（含容量不足的），供「为什么没选上」说清楚
+            free_by_key = {room_key(r.room_name): r for r in rooms}
             for name in wanted:
                 key = room_key(name)
                 pick = next((r for r in avail if room_key(r.room_name) == key), None)
                 if pick is not None and pick not in chosen:
                     chosen.append(pick)
+                    continue
+                free = free_by_key.get(key)
+                if free is not None and _capacity(free) < act.people:
+                    notes.append(
+                        f"意向教室 {name} 容量不足（{_capacity(free)} 座 < {act.people} 人），已改选"
+                    )
                 else:
-                    notes.append(f"意向教室 {name} 不可用，已改选")
-            # 补足：不可用的意向用「容量刚好够用」的空闲教室补上（要几间就排几间）
+                    notes.append(f"意向教室 {name} 不可用（该时段被占用或找不到），已改选")
+            # 补足：不可用的意向用「容量刚好够用」的空闲教室补上（要几间就排几间）——
+            # 补位池来自 ``avail``（⊂ 容量达标的那批），所以产出的每一间都满足人数
             need = len(wanted) - len(chosen)
             if need > 0:
                 pool = [r for r in avail if r not in chosen]

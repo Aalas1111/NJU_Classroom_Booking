@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from ansi_text import plain
 from typer.testing import CliRunner
 
 from crb import __version__, skill
@@ -46,7 +47,7 @@ def test_install_and_overwrite(tmp_path: Path) -> None:
 def test_cli_version() -> None:
     result = CliRunner().invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert __version__ in result.output
+    assert __version__ in plain(result.output)
 
 
 def test_cli_skill_show() -> None:
