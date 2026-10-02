@@ -375,23 +375,23 @@ def list_borrows_window(
     term: str,
     *,
     since: str = "",
+    until: str = "",
+    limit: int = 100,
     page_size: int = 100,
-    max_pages: int = 10,
+    max_pages: int = 30,
 ) -> tuple[list[BorrowRecord], dict[str, Any]]:
-    """**按提交日期倒序翻页**取申请，翻到出现早于 ``since`` 的记录就停。
+    """按提交日期（SQRQ）倒序翻页，返回 ``[since, until]`` 区间内**最新 limit 条**。
 
-    列表在一个学期里会不断累积（几百条不稀奇），全量拉既慢、又会把工具的返回撑爆——
-    而绝大多数问题只关心最近一段（默认近一周）。因为服务端已按 ``-SQRQ``（提交日期）
-    倒序，翻页可以在「翻到比窗口起点更早的那条」时立刻停：通常一页就够。
-    ``since`` 为空 = 只取第一页（与 :func:`list_borrows` 行为一致）。
-
-    返回 ``(records, meta)``；``meta = {"total": totalSize|None, "pages": 翻了几页,
-    "exhausted": 是否翻到了头}``。
+    - ``since`` 空 = 不设下界（从最早的开始找，靠 ``limit`` 兜底）；``until`` 空 = 不设上界。
+    - 翻页在「凑够 limit 条」「这页已见到底于 since 的记录」「翻到头」时停
+      （``max_pages`` 兜底，防止病态数据把页翻穿）。
+    - 返回 ``(records, meta)``；``meta = {"total": 本学期总数|None, "pages": 翻了几页,
+      "truncated": 是否因 limit 截断（更早的可能还有）}``。
     """
-    collected: list[BorrowRecord] = []
+    picked: list[BorrowRecord] = []
     total: int | None = None
     pages = 0
-    exhausted = False
+    truncated = False
     page = 1
     while page <= max_pages:
         resp = session.post_form(
@@ -408,17 +408,25 @@ def list_borrows_window(
             total = _total_of(resp, "cxjsjysq")
         page_rows = _rows(resp, "cxjsjysq")
         pages += 1
-        collected.extend(BorrowRecord.model_validate(r) for r in page_rows)
+        for row in page_rows:
+            day = str(row.get("SQRQ") or "")[:10]
+            if until and day and day > until:
+                continue  # 比上界还新：不在区间里（倒序下出现在本页前面）
+            if since and day and day < since:
+                continue  # 比下界还旧：不在区间里（只会出现在本页后部/更后的页）
+            picked.append(BorrowRecord.model_validate(row))
+            if len(picked) >= limit:
+                break
+        if len(picked) >= limit:
+            truncated = True  # 更早的可能还有，不再翻了
+            break
         if len(page_rows) < page_size:
-            exhausted = True  # 这页不满 = 没有下一页了
-            break
-        if not since:
-            break
+            break  # 这页不满 = 翻到头了
         oldest = str((page_rows[-1] or {}).get("SQRQ") or "")[:10]
-        if oldest and oldest < since:
-            break  # 已越过窗口起点：后面的只会更旧，收工
+        if since and oldest and oldest < since:
+            break  # 再往后只会更旧，且都已在区间外
         page += 1
-    return collected, {"total": total, "pages": pages, "exhausted": exhausted}
+    return picked, {"total": total, "pages": pages, "truncated": truncated}
 
 
 def delete_borrow(session: Session, sqbh: str) -> SaveResult:

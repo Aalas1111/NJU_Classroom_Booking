@@ -703,34 +703,34 @@ def plan(
 @borrow_app.command("list")
 def borrow_list(
     term: str | None = typer.Option(None, "--term", help="学年学期，默认自动获取"),
-    since: str | None = typer.Option(
-        None,
-        "--since",
-        help="只看这天（YYYY-MM-DD）及以后提交的；按页翻到第一条更早的记录就停",
+    from_date: str | None = typer.Option(
+        None, "--from", help="起始日期 YYYY-MM-DD（按提交时间；不填 = 不限）"
     ),
-    max_pages: int = typer.Option(10, "--max-pages", help="--since 时最多翻几页（每页 100 条）"),
+    to_date: str | None = typer.Option(None, "--to", help="截止日期 YYYY-MM-DD（不填 = 不限）"),
+    limit: int = typer.Option(100, "--limit", help="最多返回几条（从最新往回取）"),
     json_out: bool = typer.Option(False, "--json"),
 ) -> None:
-    """查看我的教室借用申请。"""
+    """查看我的教室借用申请（默认最新 100 条；可给 --from/--to 区间）。"""
     s = _session()
     term = term or api.current_term(s)
-    meta: dict[str, Any] = {}
-    if since:
-        rows, meta = api.list_borrows_window(s, term, since=since, max_pages=max_pages)
-    else:
-        rows = api.list_borrows(s, term)
+    rows, meta = api.list_borrows_window(
+        s, term, since=from_date or "", until=to_date or "", limit=limit
+    )
     if json_out:
-        dump_rows = [{k: v for k, v in r.model_dump().items() if v not in (None, "")} for r in rows]
-        # 带 --since 时输出 {"total": …, "pages": …, "rows": […]}
-        # （total = 学校给的本学期总数，用来给「共 N 条」一个诚实的数）
         _dump(
-            {"total": meta.get("total"), "pages": meta.get("pages"), "rows": dump_rows}
-            if since
-            else dump_rows
+            {
+                "total": meta.get("total"),
+                "count": len(rows),
+                "pages": meta.get("pages"),
+                "truncated": meta.get("truncated"),
+                "rows": [
+                    {k: v for k, v in r.model_dump().items() if v not in (None, "")} for r in rows
+                ],
+            }
         )
         return
     if not rows:
-        console.print("（暂无申请记录）")
+        console.print("（这个范围里没有申请记录）")
         return
     table = Table(title=f"我的申请 {term}")
     for col in ("SQBH", "SHZT", "JYYTMS", "XXXQDM", "KSRQ", "KSJC", "JSJC"):
@@ -746,6 +746,8 @@ def borrow_list(
             str(r.get("JSJC", "")),
         )
     console.print(table)
+    if meta.get("truncated"):
+        console.print(f"[dim]（只取了最新 {limit} 条；更早的用 --from/--to 收窄）[/dim]")
 
 
 def _load_requests(file: Path | None, data: str | None) -> list[BorrowRequest]:
