@@ -230,7 +230,7 @@ crb --version                               # 版本号
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `CRB_AUTH_FILE` | `~/.crb/auth.json` | 登录态保存位置 |
-| `CRB_PROFILE_FILE` | `~/.crb/profile.json` | 借用人档案保存位置 |
+| `CRB_PROFILE_FILE` | `~/.crb/profile.json` | 借用人档案保存位置（**账号档案段 + 通用字段**两层，见上） |
 
 ```bash
 export CRB_AUTH_FILE=/path/to/auth.json
@@ -393,6 +393,19 @@ NJU_Classroom_Booking/
 `JSJYLXDM=09`（团学活动），也可显式用 `07` 教师教学、补课 / `21` 长期借用 / `39` 考试 / `40` 讲座。
 把学生端的 `02` 填到教师端会被拦下并列出可用值。`crb doctor` 会显示当前账号契约。
 用 `CRB_AUTH_FILE` / `CRB_PROFILE_FILE` 可以让教师身份与学生身份各用独立登录态和档案。
+</details>
+
+<details>
+<summary>申请里的借用人姓名是谁？能以别人名义借吗？</summary>
+
+默认是**账号本人**（学校表单也是这么自动填的）：`crb login` / `crb plan` 会把账号自带的
+姓名与单位采集进档案的**账号档案段**（`account` / `account_name` / `account_org`），
+它就是 plan 的全局默认；通用写路径（`profile.save()`）改不动它，所以下游程序
+「顺手把某人写进 `JYRXM`」再也没法把账号本人顶掉。
+
+要以别人名义借，走**单次覆盖**：plan 文件里写 `{"defaults": {"JYRXM": "某某"}}`
+（`apply_profile` 只补缺，所以给了就用给的），或显式改档 `crb profile --name 某某`
+（写的就是账号档案段本身）。`crb borrow edit --data '{"JYRXM":"某某"}'` 也能改已有申请。
 </details>
 
 <details>

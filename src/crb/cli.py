@@ -166,16 +166,22 @@ def _contract_line(role: str, codes: dict[str, str]) -> str:
 
 
 def _collect_profile(phone: str | None, name: str | None) -> None:
-    """登录后采集姓名 / 手机号 / 单位 / 账号契约，存入本地档案。"""
+    """登录后采集姓名 / 手机号 / 单位 / 账号契约，存入本地档案。
+
+    姓名/单位落**账号档案段**（`profile.save_identity`）—— 它们是账号自带的，
+    也就是 plan 的全局默认；手机号/契约落通用字段。
+    """
     prof = profile_mod.load()
     data: dict[str, Any] = {}
     contract_line = ""
+    org_code = ""
     try:
         s = Session()
         s.load()
         org = api.my_org(s)
         if org.get("SZDWDM"):
-            data["JYDWDM"] = org["SZDWDM"]
+            org_code = str(org["SZDWDM"])
+            data["JYDWDM"] = org_code
         role, codes = api.borrow_contract(s)
         if api.default_borrow_type(role):
             data["borrow_role"] = role
@@ -191,7 +197,7 @@ def _collect_profile(phone: str | None, name: str | None) -> None:
         identity = api.account_identity(s)
     except Exception:  # noqa: BLE001 - 读不到就问，不该因此中断登录
         identity = {}
-    name = name or identity.get("name") or prof.get("JYRXM") or ""
+    name = name or identity.get("name") or profile_mod.identity(prof)["name"] or ""
     phone = phone or prof.get("JYRDH") or ""
     if sys.stdin.isatty():
         try:
@@ -209,6 +215,11 @@ def _collect_profile(phone: str | None, name: str | None) -> None:
         data["JYRXM"] = name
     if phone:
         data["JYRDH"] = phone
+    if name or org_code:
+        # 账号档案段：只有采集这条路能写（见 profile 模块 docstring）
+        profile_mod.save_identity(
+            account=str(identity.get("account") or ""), name=name or "", org=org_code
+        )
     if data:
         p = profile_mod.save(data)
         console.print(f"✓ 档案已保存：{p}")
@@ -219,6 +230,33 @@ def _collect_profile(phone: str | None, name: str | None) -> None:
         if contract_line:
             line += f"  契约={contract_line}"
         console.print(line)
+
+
+def _ensure_profile_identity(s: Session) -> dict[str, Any]:
+    """`plan` 之前核对**账号档案段**：换过账号 / 没采过 → 现取一份写回去。
+
+    姓名/单位是**账号自带**的（学校表单也是前端自动填的），它就是 plan 的
+    全局默认；档案通用字段里别人留下的值顶不掉它（见 `profile` 模块 docstring）。
+    读不到（风控 / 接口变了）就用档案里那份，**不猜**。
+    """
+    prof = profile_mod.load()
+    ident = profile_mod.identity(prof)
+    try:
+        live = api.account_identity(s)
+    except Exception:  # noqa: BLE001 - 取不到就不动档案
+        return prof
+    account = str(live.get("account") or "")
+    if not account or (account == ident["account"] and ident["name"]):
+        return prof
+    org = ident["org"]
+    try:
+        org = str((api.my_org(s) or {}).get("SZDWDM") or "") or org
+    except Exception:  # noqa: BLE001
+        pass
+    name = str(live.get("name") or "") or ident["name"]
+    profile_mod.save_identity(account=account, name=name, org=org)
+    profile_mod.save({"JYRXM": name, "JYDWDM": org})  # 通用字段的兼容投影
+    return profile_mod.load()
 
 
 @app.command("profile")
@@ -237,6 +275,10 @@ def profile_cmd(
         "campus": campus,
     }
     if any(v is not None for v in changes.values()):
+        if name is not None or org is not None:
+            # 显式改档 = 改**账号档案段**（外加通用字段那份兼容投影）：
+            # 这是「以某人名义借」在引擎里的正当入口，别拿它当默认值来用。
+            profile_mod.save_identity(name=name or "", org=org or "")
         profile_mod.save(changes)
     prof = profile_mod.load()
     if json_out:
@@ -617,10 +659,12 @@ def plan(
     """批量规划：查空闲教室 → 分配 → 冲突检测 →（可选）批量存草稿。"""
     s = _session()
     applicant, activities = planner.load_plan(file)
-    planner.apply_profile(applicant, profile_mod.load())
     if not activities:
         err_console.print("[red]活动列表为空[/red]")
         raise typer.Exit(2)
+    # 姓名/单位：**账号档案段（账号本人）是全局默认**；plan 文件里的
+    # defaults 是单次覆盖（apply_profile 只补缺，所以覆盖仍然生效）。
+    planner.apply_profile(applicant, profile_mod.defaults(_ensure_profile_identity(s)))
 
     term = api.current_term(s)
     role, codes = api.borrow_contract(s)
