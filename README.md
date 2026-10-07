@@ -406,6 +406,10 @@ NJU_Classroom_Booking/
 要以别人名义借，走**单次覆盖**：plan 文件里写 `{"defaults": {"JYRXM": "某某"}}`
 （`apply_profile` 只补缺，所以给了就用给的），或显式改档 `crb profile --name 某某`
 （写的就是账号档案段本身）。`crb borrow edit --data '{"JYRXM":"某某"}'` 也能改已有申请。
+
+显式改档与「plan 前自动重采账号信息」**不打架**：改档后档案里带上了账号号，
+plan 一看账号号一致就不动它；只有**账号真的换了**（或还没采过）才会重采。
+（登录之前改的档没有账号号，第一次 plan 只会把账号号认下来，照样不改姓名。）
 </details>
 
 <details>

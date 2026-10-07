@@ -232,12 +232,38 @@ def _collect_profile(phone: str | None, name: str | None) -> None:
         console.print(line)
 
 
+def _identity_decision(ident: dict[str, str], account: str) -> str:
+    """账号档案段要不要动：``skip`` / ``adopt``（认下账号号，姓名不动）/ ``refresh``。
+
+    这是「plan 前自动重采」（`_ensure_profile_identity`）与「显式改档」
+    （`crb profile --name`）**不打架**的那条线：
+
+    * 账号号一致、档案里有姓名 → ``skip`` —— 显式改档就靠这条活着
+      （`--name` 写的就是账号档案段，自动重采绝不能把它抹回账号真名）；
+    * 账号号变了 → ``refresh`` —— 旧档案是**上一个账号**的，本来就该重学；
+    * 档案里没姓名 → ``refresh``（还没采过，或升级前的老档案）；
+    * 有姓名、但双方都没记账号号（老档案，或 `crb profile --name` 是在登录之前
+      改的）→ ``adopt``：只把账号号认下来、**姓名不动** —— 否则第一次 plan
+      就会把手工改档静默抹掉（这就是会打架的那种情形）。
+    """
+    if not account:
+        return "skip"
+    if ident["account"] and ident["account"] != account:
+        return "refresh"
+    if not ident["name"]:
+        return "refresh"
+    if not ident["account"]:
+        return "adopt"
+    return "skip"
+
+
 def _ensure_profile_identity(s: Session) -> dict[str, Any]:
     """`plan` 之前核对**账号档案段**：换过账号 / 没采过 → 现取一份写回去。
 
     姓名/单位是**账号自带**的（学校表单也是前端自动填的），它就是 plan 的
     全局默认；档案通用字段里别人留下的值顶不掉它（见 `profile` 模块 docstring）。
-    读不到（风控 / 接口变了）就用档案里那份，**不猜**。
+    读不到（风控 / 接口变了）就用档案里那份，**不猜**；显式改过档的姓名
+    也不会被自动重采抹掉（见 :func:`_identity_decision`）。
     """
     prof = profile_mod.load()
     ident = profile_mod.identity(prof)
@@ -246,8 +272,13 @@ def _ensure_profile_identity(s: Session) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - 取不到就不动档案
         return prof
     account = str(live.get("account") or "")
-    if not account or (account == ident["account"] and ident["name"]):
+    decision = _identity_decision(ident, account)
+    if decision == "skip":
         return prof
+    if decision == "adopt":
+        # 姓名/单位是显式改档（或老档案）给的那份，只把账号号认下来。
+        profile_mod.save_identity(account=account)
+        return profile_mod.load()
     org = ident["org"]
     try:
         org = str((api.my_org(s) or {}).get("SZDWDM") or "") or org

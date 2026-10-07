@@ -120,6 +120,51 @@ def test_ensure_profile_identity_is_quiet_when_account_matches(
     assert profile.identity()["name"] == "郭亚敏"
 
 
+def test_identity_decision_matrix() -> None:
+    """决策表：这是「plan 前自动重采」与「显式改档」能共存的根据。"""
+    cur = {"account": "0412007", "name": "郭亚敏", "org": "200300"}
+    assert cli._identity_decision(cur, "0412007") == "skip"
+    assert cli._identity_decision(cur, "") == "skip"  # 读不到账号号：不猜、不动
+    assert cli._identity_decision(cur, "123") == "refresh"  # 换过账号
+    assert cli._identity_decision({**cur, "name": ""}, "0412007") == "refresh"  # 还没采过
+    assert cli._identity_decision({**cur, "account": ""}, "0412007") == "adopt"
+
+
+def test_explicit_rename_survives_plan_refresh(
+    archive: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`crb profile --name` 显式改档 vs plan 前自动重采：两者不打架。
+
+    `--name` 写的就是账号档案段，所以自动重采必须认它（账号号一致 → 不动）。
+    """
+    profile.save_identity(account="0412007", name="卢佳铭", org="200300")
+
+    monkeypatch.setattr(
+        cli.api, "account_identity", lambda _s: {"name": "郭亚敏", "account": "0412007"}
+    )
+    monkeypatch.setattr(cli.api, "my_org", lambda _s: pytest.fail("不该重采"))
+
+    defaults = profile.defaults(cli._ensure_profile_identity(object()))  # type: ignore[arg-type]
+    assert profile.identity()["name"] == "卢佳铭"
+    assert defaults["JYRXM"] == "卢佳铭"  # 改档照旧生效
+
+
+def test_explicit_rename_on_accountless_profile_is_adopted(
+    archive: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """登录之前改的档（档案里还没账号号）：只认账号号，**姓名不动**。"""
+    profile.save_identity(name="卢佳铭", org="200300")
+    assert profile.identity()["account"] == ""
+
+    monkeypatch.setattr(
+        cli.api, "account_identity", lambda _s: {"name": "郭亚敏", "account": "0412007"}
+    )
+    monkeypatch.setattr(cli.api, "my_org", lambda _s: pytest.fail("adopt 不该重采"))
+
+    cli._ensure_profile_identity(object())  # type: ignore[arg-type]
+    assert profile.identity() == {"account": "0412007", "name": "卢佳铭", "org": "200300"}
+
+
 def test_ensure_profile_identity_survives_probe_failure(
     archive: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
